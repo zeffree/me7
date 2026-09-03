@@ -1,0 +1,317 @@
+@import 'tailwindcss';
+
+@font-face {
+  font-family: 'Archivo';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 400 800;
+  font-stretch: 75% 125%;
+  src: url('./assets/fonts/archivo-latin-wdth-normal.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Public Sans';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 400 700;
+  src: url('./assets/fonts/public-sans-latin-wght-normal.woff2') format('woff2');
+}
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-display: 'Archivo', ui-sans-serif, system-ui, sans-serif;
+  --font-sans: 'Public Sans', ui-sans-serif, system-ui, sans-serif;
+
+  /* Brand — indigo/violet primary with a teal accent for the positive/savings story. */
+  --color-brand-50: oklch(0.97 0.02 285);
+  --color-brand-100: oklch(0.94 0.04 285);
+  --color-brand-200: oklch(0.88 0.07 285);
+  --color-brand-300: oklch(0.8 0.11 285);
+  --color-brand-400: oklch(0.71 0.16 285);
+  --color-brand-500: oklch(0.63 0.2 285);
+  --color-brand-600: oklch(0.55 0.22 285);
+  --color-brand-700: oklch(0.47 0.2 285);
+  --color-brand-800: oklch(0.39 0.16 285);
+  --color-brand-900: oklch(0.31 0.12 285);
+  --color-brand-950: oklch(0.2 0.08 285);
+
+  --color-accent-300: oklch(0.83 0.12 185);
+  --color-accent-400: oklch(0.76 0.14 185);
+  --color-accent-500: oklch(0.68 0.15 185);
+  --color-accent-600: oklch(0.58 0.13 185);
+  --color-accent-700: oklch(0.44 0.11 185);
+
+  --color-ink-50: oklch(0.98 0.003 285);
+  --color-ink-100: oklch(0.95 0.005 285);
+  --color-ink-200: oklch(0.89 0.007 285);
+  --color-ink-300: oklch(0.78 0.01 285);
+  --color-ink-400: oklch(0.63 0.014 285);
+  --color-ink-500: oklch(0.51 0.016 285);
+  --color-ink-600: oklch(0.41 0.018 285);
+  --color-ink-700: oklch(0.32 0.018 285);
+  --color-ink-800: oklch(0.23 0.017 285);
+  --color-ink-850: oklch(0.19 0.016 285);
+  --color-ink-900: oklch(0.15 0.015 285);
+  --color-ink-950: oklch(0.11 0.014 285);
+}
+
+@layer base {
+  :root {
+    color-scheme: light;
+    --surface: var(--color-white);
+    --surface-raised: var(--color-white);
+    --surface-sunken: var(--color-ink-50);
+    --border-subtle: var(--color-ink-200);
+    --text-primary: var(--color-ink-900);
+    --text-secondary: var(--color-ink-700);
+    --text-muted: var(--color-ink-600);
+  }
+
+  .dark {
+    color-scheme: dark;
+    --surface: var(--color-ink-900);
+    --surface-raised: var(--color-ink-850);
+    --surface-sunken: var(--color-ink-950);
+    --border-subtle: var(--color-ink-800);
+    --text-primary: var(--color-ink-50);
+    --text-secondary: var(--color-ink-200);
+    --text-muted: var(--color-ink-300);
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    background-color: var(--surface-sunken);
+    color: var(--text-primary);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    font-variant-numeric: tabular-nums;
+    overflow-x: hidden;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    font-family: var(--font-display);
+    letter-spacing: -0.02em;
+  }
+
+  /* Respect users who have asked the OS to reduce motion. */
+  @media (prefers-reduced-motion: reduce) {
+    html {
+      scroll-behavior: auto;
+    }
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.001ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.001ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-brand-500);
+    outline-offset: 2px;
+    border-radius: 0.25rem;
+  }
+
+  /* Strip the spinners so currency fields read as money, not counters. */
+  input[type='number']::-webkit-outer-spin-button,
+  input[type='number']::-webkit-inner-spin-button {
+    appearance: none;
+    margin: 0;
+  }
+  input[type='number'] {
+    appearance: textfield;
+    -moz-appearance: textfield;
+  }
+}
+
+@layer components {
+  .surface {
+    background-color: var(--surface);
+    border-color: var(--border-subtle);
+  }
+  .surface-raised {
+    background-color: var(--surface-raised);
+    border-color: var(--border-subtle);
+  }
+  .text-secondary {
+    color: var(--text-secondary);
+  }
+  .text-muted {
+    color: var(--text-muted);
+  }
+  .border-subtle {
+    border-color: var(--border-subtle);
+  }
+
+  /* Big money figures: Archivo's width axis makes these feel deliberate rather than default. */
+  .numeral {
+    font-family: var(--font-display);
+    font-variation-settings: 'wdth' 112;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.03em;
+  }
+
+  .hero-glow {
+    background-image:
+      radial-gradient(60rem 30rem at 15% -10%, oklch(0.63 0.2 285 / 0.28), transparent 60%),
+      radial-gradient(45rem 25rem at 90% 0%, oklch(0.68 0.15 185 / 0.18), transparent 55%);
+  }
+}
+
+/* ─────────────────────────────────────────── print: the business case on paper */
+@media print {
+  @page {
+    size: A4;
+    margin: 14mm;
+  }
+
+  html,
+  body {
+    background: #fff !important;
+    color: #000 !important;
+  }
+
+  .no-print {
+    display: none !important;
+  }
+
+  .print-only {
+    display: block !important;
+  }
+
+  .print-break-before {
+    break-before: page;
+  }
+
+  .print-avoid-break,
+  .print-keep {
+    break-inside: avoid;
+  }
+
+  .print-detail {
+    display: none !important;
+  }
+
+  #root,
+  main {
+    background: #fff !important;
+  }
+
+  main {
+    font-size: 9pt;
+    line-height: 1.25;
+  }
+
+  h1,
+  h2,
+  h3 {
+    break-after: avoid;
+    color: #111 !important;
+  }
+
+  .surface,
+  .surface-raised {
+    background: #fff !important;
+    border-color: #c9c9d1 !important;
+    box-shadow: none !important;
+    /* A card sliced across the page fold reads as a printing error, not a document. */
+    break-inside: avoid;
+  }
+
+  .hero-glow {
+    background-image: none !important;
+  }
+
+  .rounded-2xl,
+  .rounded-xl {
+    border-radius: 8px !important;
+  }
+
+  .p-8,
+  .p-6,
+  .p-5,
+  .p-4,
+  .sm\:p-8 {
+    padding: 9px !important;
+  }
+
+  .mt-10,
+  .mt-8,
+  .mt-6,
+  .mt-5,
+  .mt-4,
+  .mt-3,
+  .mt-2\.5,
+  .mt-2,
+  .mt-1\.5,
+  .mt-1 {
+    margin-top: 6px !important;
+  }
+
+  .space-y-5 > :not([hidden]) ~ :not([hidden]),
+  .space-y-4 > :not([hidden]) ~ :not([hidden]),
+  .space-y-3 > :not([hidden]) ~ :not([hidden]),
+  .space-y-2 > :not([hidden]) ~ :not([hidden]) {
+    margin-top: 8px !important;
+  }
+
+  .grid {
+    gap: 8px !important;
+  }
+
+  .h-72 {
+    height: 190px !important;
+  }
+
+  .h-10 {
+    height: 28px !important;
+  }
+
+  .text-secondary,
+  .text-muted {
+    color: #333 !important;
+  }
+
+  .numeral {
+    color: #111 !important;
+  }
+
+  table {
+    min-width: 0 !important;
+    width: 100% !important;
+    font-size: 8.5pt;
+  }
+
+  th,
+  td {
+    padding: 5px 7px !important;
+  }
+
+  svg {
+    overflow: visible !important;
+  }
+
+  /* Force the dark theme off so charts and cards render legibly on paper. */
+  .dark {
+    --surface: #fff;
+    --surface-raised: #fff;
+    --surface-sunken: #fff;
+    --border-subtle: #d4d4d8;
+    --text-primary: #18181b;
+    --text-secondary: #3f3f46;
+    --text-muted: #52525b;
+  }
+}
+
+.print-only {
+  display: none;
+}

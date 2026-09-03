@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>M365 E7 Consolidation &amp; Savings Assessment</title>
+    <meta
+      name="description"
+      content="Capture what you spend on point solutions today and see what Microsoft 365 E7 actually nets out to after consolidation."
+    />
+    <link rel="icon" href="data:," />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      // Apply the saved theme before first paint, otherwise a user who chose the light
+      // theme gets a flash of dark while React boots.
+      (function () {
+        try {
+          var saved = JSON.parse(localStorage.getItem('me7-assessment') || '{}');
+          var theme = saved && saved.state && saved.state.theme;
+          if (theme === 'light') document.documentElement.classList.remove('dark');
+          document.documentElement.style.colorScheme = theme === 'light' ? 'light' : 'dark';
+        } catch (e) {
+          /* first visit, private mode, or blocked storage — the dark default stands */
+        }
+      })();
+    </script>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
