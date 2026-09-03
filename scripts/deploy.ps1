@@ -6,11 +6,8 @@
 
   The app runs on a Linux plan, so the deployment package is dist/ plus
   server/server.mjs, which serves the files and applies the SPA fallback,
-  cache policy and security headers. Linux Basic B1 costs about a quarter of
+  cache policy and security headers.   Linux Basic B1 costs about a quarter of
   the Windows equivalent, which is why this is not an IIS/web.config host.
-
-  The Static Web App at kind-stone-0a2a72000.3.azurestaticapps.net is kept as a
-  fallback host and is deployed separately via `npm run deploy:swa`.
 #>
 [CmdletBinding()]
 param(
@@ -42,7 +39,14 @@ Remove-Item $zip -ErrorAction SilentlyContinue
 Compress-Archive -Path (Join-Path $stage '*') -DestinationPath $zip
 
 Write-Host ("Deploying {0:N0} KB to {1}..." -f ((Get-Item $zip).Length / 1KB), $AppName)
-az webapp deploy --resource-group $ResourceGroup --name $AppName --src-path $zip --type zip --only-show-errors | Out-Null
+
+# --clean wipes wwwroot before extracting. Without it a zip deploy only overlays
+# the package, so a file dropped from the build lingers on disk and keeps being
+# served -- which is how a deleted staticwebapp.config.json outlived its own
+# removal. A static site has no state in wwwroot worth preserving.
+az webapp deploy --resource-group $ResourceGroup --name $AppName --src-path $zip `
+  --type zip --clean true --restart true --only-show-errors | Out-Null
+if ($LASTEXITCODE -ne 0) { throw "Deployment failed with exit code $LASTEXITCODE." }
 
 Remove-Item $zip -ErrorAction SilentlyContinue
 Remove-Item $stage -Recurse -Force -ErrorAction SilentlyContinue

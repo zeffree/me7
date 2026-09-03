@@ -2,8 +2,7 @@
  * Static file server for Azure App Service (Linux).
  *
  * Linux App Service has no IIS, so this reproduces the rules that
- * public/web.config applies on Windows and public/staticwebapp.config.json
- * applies on Static Web Apps. All three must be kept in sync:
+ * public/web.config would apply on a Windows host. Both must be kept in sync:
  *   - security headers (including CSP)
  *   - immutable caching for hashed assets, no-cache for index.html
  *   - SPA fallback to index.html
@@ -53,9 +52,9 @@ const SECURITY_HEADERS = {
     "base-uri 'self'; form-action 'none'; frame-ancestors 'none'",
 };
 
-// Hosting configs describe this server; serving them would leak the CSP and
+// Hosting config describes this server; serving it would leak the CSP and
 // routing rules for no benefit.
-const NEVER_SERVE = new Set(['web.config', 'staticwebapp.config.json', 'server.mjs']);
+const NEVER_SERVE = new Set(['web.config', 'server.mjs']);
 
 const COMPRESSIBLE = /^(text\/|application\/(json|manifest\+json|javascript)|image\/svg)/;
 

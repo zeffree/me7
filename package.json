@@ -11,8 +11,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "deploy": "npm run build && powershell -NoProfile -ExecutionPolicy Bypass -File scripts/deploy.ps1",
-    "deploy:swa": "npm run build && powershell -NoProfile -ExecutionPolicy Bypass -File scripts/deploy-swa.ps1"
+    "deploy": "npm run build && powershell -NoProfile -ExecutionPolicy Bypass -File scripts/deploy.ps1"
   },
   "dependencies": {
     "framer-motion": "^12.23.12",

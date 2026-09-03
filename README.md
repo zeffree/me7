@@ -225,17 +225,18 @@ no-referrer` so a share link is not leaked in the `Referer` header of outbound c
 
 ## Deployment
 
-Hosted on Azure App Service (Linux, Basic B1). The original Azure Static Web App is kept in sync as
-a fallback host and costs nothing.
+Hosted on Azure App Service (Linux, Basic B1).
 
 | | |
 |---|---|
 | Resource group | `rg-me7` (southeastasia) |
-| **Primary** | App Service `e7calc` on plan `asp-e7calc-linux` (Linux B1) — https://e7calc.azurewebsites.net |
-| Fallback | Static Web App `swa-me7` (East Asia, Free) — https://kind-stone-0a2a72000.3.azurestaticapps.net |
+| Host | App Service `e7calc` on plan `asp-e7calc-linux` (Linux B1) — https://e7calc.azurewebsites.net |
 
-The App Service default hostname is chosen by us; a Static Web App's `*.azurestaticapps.net`
-hostname is randomly generated and cannot be renamed, which is why the primary host moved.
+The app was originally on an Azure Static Web App. A Static Web App's `*.azurestaticapps.net`
+hostname is randomly generated and cannot be renamed, which is why the host moved to App Service —
+its default hostname is ours to choose. The Static Web App was kept as a fallback for a while and
+has since been deleted, because a second host serving a stale build is a liability rather than
+insurance.
 
 ### Why Linux
 
@@ -249,9 +250,9 @@ a Windows Server licence. In southeastasia:
 
 Same specs. Linux is therefore the plan to use, which means no IIS and no `web.config`.
 
-### Hosting config — three files, one behaviour
+### Hosting config — two files, one behaviour
 
-Each host applies the same rules a different way. **All three must be kept in sync**: SPA fallback,
+Each host applies the same rules a different way. **Both must be kept in sync**: SPA fallback,
 cache policy (immutable for hashed assets, `no-cache` for `index.html`), MIME types, and the
 security headers including a Content-Security-Policy.
 
@@ -259,12 +260,11 @@ security headers including a Content-Security-Policy.
 |---|---|
 | `server/server.mjs` | App Service (Linux) — **the live one** |
 | `public/web.config` | App Service (Windows/IIS) — kept for reference |
-| `public/staticwebapp.config.json` | Static Web Apps fallback |
 
 `server/server.mjs` is a zero-dependency Node server, so there is no install step on cold start. It
 reads the build into memory once at startup and precomputes gzip and Brotli for every compressible
 file, so requests never touch the disk. Brotli takes the main bundle from 527 KB to 141 KB — which
-Static Web Apps does automatically but a plain App Service does not. It also serves `ETag`/`304`,
+Static Web Apps did automatically but a plain App Service does not. It also serves `ETag`/`304`,
 rejects non-GET/HEAD methods, and refuses to serve the hosting config files themselves.
 
 HTTPS redirection is handled by the App Service `httpsOnly` setting rather than a rewrite rule,
@@ -276,18 +276,8 @@ because `{HTTPS}` reads `off` behind the App Service front end and a rewrite wou
 npm run deploy
 ```
 
-That builds, stages `dist/` plus `server/server.mjs` into one package, and zip-deploys it.
-
-To redeploy the Static Web App fallback:
-
-```bash
-npm run deploy:swa
-```
-
-`scripts/deploy-swa.ps1` reads the deployment token from Azure at run time via
-`az staticwebapp secrets list`, so the secret never lands in the repo, in `package.json`, or in
-shell history. It does require an active `az login`. Without a token the SWA CLI drops into an
-interactive resource picker and appears to hang.
+That builds, stages `dist/` plus `server/server.mjs` into one package, and zip-deploys it. It
+requires an active `az login`.
 
 ### Gotcha: the runtime string
 
