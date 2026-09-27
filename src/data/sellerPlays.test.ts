@@ -17,7 +17,7 @@ const ctx = (over: Partial<DealContext> = {}): DealContext => ({
   redundantToday: 0,
   notCoveredAnnual: 0,
   capturedLines: 10,
-  avoidedSelected: 0,
+  avoidedLicenceAnnual: 0,
   ...over,
 });
 

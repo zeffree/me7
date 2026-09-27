@@ -163,11 +163,13 @@ function CategoryRecord({ record, baselineName }: { record: AuditLog['categories
         ? '0 USD stored — no reference estimate; not free service'
         : `${money(category.benchmarkPupm)} / modeled user / month`],
       ['Stored typical adoption fraction', category.typicalAdoptionPct ?? 'Not specified; the engine defaults to the whole workforce'],
-      ['Modeled adoption used for planned capability', `${record.modeledAdoption * 100}% of workforce (illustrative, not verified)`],
-      ['Customer planned-capability selection', stored(record.planned)],
-      ['Current planned-capability candidate', record.currentPlannedEstimate
-        ? `${formatNumber(record.currentPlannedEstimate.licensedSeats)} modeled seats; ${money(record.currentPlannedEstimate.avoidedAnnual)} / year; ${record.currentPlannedEstimate.selected ? 'selected' : 'not selected'}; outside cash`
-        : 'Not a current engine candidate; baseline coverage and purchased invoices determine eligibility'],
+      ['Modeled adoption used for third-party context', `${record.modeledAdoption * 100}% of workforce (illustrative, not verified)`],
+      ['Planned for deployment', stored(record.plannedForDeployment)],
+      ['Capability cost avoided with E7', !record.currentAvoidedCapability
+        ? 'Not a capability gap for the selected baseline'
+        : !record.currentAvoidedCapability.priced
+          ? 'No standalone Microsoft licence is priced for this capability; not valued'
+          : `On its own: ${record.currentAvoidedCapability.standaloneLicenceNames.join(' + ') || 'already licensed'} for ${formatNumber(record.currentAvoidedCapability.users)} users, ${money(record.currentAvoidedCapability.standaloneAnnual)} / year${record.currentAvoidedLicence ? `; in the lowest-cost set via ${record.currentAvoidedLicence.licence.name} (${money(record.currentAvoidedLicence.annual)} / year for the licence)` : '; not selected'}; outside cash`],
       ['Seller talk track', category.talkTrack ?? 'No category-specific talk track recorded'],
     ]} />
     <ReviewEvidence title="Category applicability" evidence={record.evidence} />

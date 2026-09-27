@@ -1,5 +1,6 @@
 import type { BaselineSkuId } from '@/data/skus';
 import type { Category, Confidence, Coverage, DomainId } from '@/data/categories';
+import type { StandaloneLicence } from '@/data/standaloneLicences';
 import type { TeiBenefitLine, TeiStudyId } from '@/data/teiStudies';
 
 /** How a spend figure was entered. */
@@ -107,14 +108,20 @@ export interface Assessment {
   assumptions: Assumptions;
   lines: SpendLine[];
   addOns: AddOnLine[];
-  /**
-   * Category ids the customer does not pay for today and intends to switch on once E7 includes
-   * them. These drive cost avoidance, which is deliberately kept out of the cash savings: the
-   * customer is not cancelling an invoice, they are getting capability they would otherwise have
-   * had to buy. Folding it into net impact would inflate the number a CFO is asked to trust.
-   */
-  plannedCapabilities: string[];
+  /** Gap capabilities the customer plans to deploy; valued at standalone Microsoft licence prices. */
+  plannedCapabilities?: string[];
+  /** Customer edits to the capability cost-avoidance view. Absent means all defaults. */
+  costAvoidance?: CostAvoidanceSettings;
   tei: TeiSettings;
+}
+
+/**
+ * Edits to the capability cost-avoidance view: users per capability (default all seats) and USD
+ * unit prices per standalone licence (default list less the E7 discount).
+ */
+export interface CostAvoidanceSettings {
+  users: Record<string, number>;
+  unitPrices: Record<string, number>;
 }
 
 /**
@@ -201,26 +208,103 @@ export type PaybackStatus =
   | 'break-even'
   | 'cost-increase';
 
+export type LicenceOwnership = 'none' | 'partial' | 'full';
+
+/** A third-party invoice already credited as a cash retirement for a capability this licence grants. */
+export interface CashOverlap {
+  categoryId: string;
+  categoryName: string;
+  vendor: string;
+  annualCredit: number;
+}
+
 /**
- * A capability the customer has no spend against today, which E7 either newly unlocks or raises
- * to a usable tier. If they wanted it, they would have to buy it — so switching it on avoids a
- * cost rather than removing one. Priced at the catalog benchmark, never at a customer figure,
- * because by definition there is no customer figure.
+ * A capability E7 includes that the customer's current suite does not, and what licensing it
+ * separately from Microsoft would cost. The customer selects the capabilities they plan to deploy;
+ * only those count. This is a licence counterfactual, never an invoice they stop paying.
  */
-export interface AvoidedCost {
-  currency: 'USD';
+export interface AvoidedCapability {
   category: Category;
-  coverage: Coverage;
-  /** Catalog benchmark, per user per month, for the third-party products in this category. */
-  benchmarkPupm: number;
-  /** Share of the workforce that would realistically hold a seat, 0–1. */
-  adoptionPct: number;
-  /** seats × adoptionPct, rounded. What you'd actually have had to buy. */
-  licensedSeats: number;
-  /** benchmarkPupm × licensedSeats × 12. */
-  avoidedAnnual: number;
-  /** True when the customer has chosen to count this. Only selected rows total up. */
+  /** The customer plans to deploy it. */
   selected: boolean;
+  /** False when no standalone Microsoft licence in the catalog provides it on this baseline. */
+  priced: boolean;
+  defaultUsers: number;
+  users: number;
+  usersOverridden: boolean;
+  /** Cheapest licences that would provide just this capability, bought on its own. */
+  standaloneLicenceIds: string[];
+  standaloneLicenceNames: string[];
+  standaloneAnnual: number;
+  /** Purchased Microsoft add-ons that already license it for every user. */
+  ownedVia: string[];
+  /** When selected, the licence in the combined set credited with it. */
+  coveredByLicenceId?: string;
+  /** Illustrative third-party category benchmark for the same users. Context only. */
+  thirdPartyReferencePupm: number;
+  thirdPartyReferenceAnnual: number;
+  cashOverlap: CashOverlap[];
+}
+
+/**
+ * One Microsoft licence in the cheapest set that provides every selected capability. Kept out of
+ * every cash total.
+ */
+export interface AvoidedLicence {
+  currency: 'USD';
+  licence: StandaloneLicence;
+  /** Selected capabilities this licence is credited with. */
+  capabilities: Category[];
+  /** Licences in the set that need this one as a prerequisite. */
+  prerequisiteFor: StandaloneLicence[];
+  listPricePupm: number;
+  /** The assessment's E7 discount, applied to the list reference by default. */
+  discountPct: number;
+  defaultUnitPupm: number;
+  unitPupm: number;
+  unitPriceOverridden: boolean;
+  /** Users the licence must cover: the largest user count among its capabilities. */
+  quantity: number;
+  /** quantity less users already licensed through a purchased Microsoft add-on. */
+  paidQuantity: number;
+  ownership: LicenceOwnership;
+  ownedSeats: number;
+  ownedAddOnNames: string[];
+  /** Purchased add-on spend a suite step-up would replace, credited against it. */
+  supersededCredit: number;
+  supersededAddOnNames: string[];
+  /** unitPupm × paidQuantity × 12. */
+  grossAnnual: number;
+  /** grossAnnual − supersededCredit, never below zero. */
+  annual: number;
+  cashOverlap: CashOverlap[];
+}
+
+export interface CostAvoidance {
+  currency: 'USD';
+  /** Every gap capability for the baseline, selected or not, in catalog order. */
+  capabilities: AvoidedCapability[];
+  /** The cheapest licence set that provides every selected, priced capability. */
+  lines: AvoidedLicence[];
+  selectedCount: number;
+  /** Gap capabilities no standalone Microsoft licence provides on this baseline; not valued. */
+  unpriced: Category[];
+  /** Annual cost of the cheapest licence set. The headline cost avoided. */
+  annualAvoided: number;
+  /** Sum of each selected capability licensed on its own. Never less than annualAvoided. */
+  standaloneSumAnnual: number;
+  /** Illustrative third-party benchmark for the selected capabilities. Context only. */
+  thirdPartyReferenceAnnual: number;
+  /** Current suite plus the purchased Microsoft add-ons E7 absorbs. */
+  currentLicenceAnnual: number;
+  /** currentLicenceAnnual + annualAvoided: licence spend for the selected capabilities without E7. */
+  buySeparatelyAnnual: number;
+  buySeparatelyPupm: number;
+  e7Annual: number;
+  e7NetPupm: number;
+  /** buySeparatelyAnnual − e7Annual. Positive means E7 costs less than buying separately. */
+  bundleDifferenceAnnual: number;
+  bundleDifferencePupm: number;
 }
 
 export interface EngineResult {
@@ -272,12 +356,8 @@ export interface EngineResult {
   tco: TcoYear[];
   tcoNetBenefit: number;
 
-  // ---- cost avoidance (value gained, NOT cash saved — never added to netAnnual*)
-  avoidedCosts: AvoidedCost[];
-  /** Benchmark value of the selected capabilities only. */
-  avoidedAnnualSelected: number;
-  /** Benchmark value if every candidate capability were switched on. */
-  avoidedAnnualAll: number;
+  // ---- licence cost avoidance (licence counterfactual, NOT cash saved — never added to netAnnual*)
+  costAvoidance: CostAvoidance;
 }
 
 /** One study benefit line, scaled to this customer. */

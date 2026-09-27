@@ -247,7 +247,8 @@ export interface DealContext {
   redundantToday: number;
   notCoveredAnnual: number;
   capturedLines: number;
-  avoidedSelected: number;
+  /** Capability cost avoided with E7 for the capabilities planned for deployment, USD. A counterfactual, never cash. */
+  avoidedLicenceAnnual: number;
 }
 
 const OBJECTION_RECORDS: Objection[] = [
@@ -328,12 +329,12 @@ const OBJECTION_RECORDS: Objection[] = [
     when: (c) => c.notCoveredAnnual > 0,
   },
   {
-    id: 'benchmark-value',
-    objection: '"The new-capability value looks made up."',
-    concede: 'The stored benchmarks are illustrative USD planning estimates, not quotes.',
+    id: 'licence-avoidance-value',
+    objection: '"We would never buy all of those licences, so that avoided-cost figure is inflated."',
+    concede: 'Fair — it is what those capabilities would cost to license separately, not a plan to buy them.',
     answer:
-      'Keep it separate from recurring cash savings and TCO. Select only capabilities the customer actually plans to buy, and discuss the budget, modeled users and USD amount. A category planning estimate is not a vendor quote or a cash saving.',
-    when: (c) => c.avoidedSelected > 0,
+      'Keep it separate from recurring cash savings and TCO. It only counts the capabilities the customer says they will deploy, so walk that list with them: deselect anything they would not roll out and set users to the people who need it. The figure is the lowest-cost set of Microsoft licences for what remains — priced at list reference less the E7 discount, not a quote.',
+    when: (c) => c.avoidedLicenceAnnual > 0,
   },
   {
     id: 'thin-data',

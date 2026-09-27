@@ -8,16 +8,22 @@
  */
 
 import { CATEGORIES, type Confidence, type Coverage, type DomainId } from '@/data/categories';
-import { getAddOn, getAddOnCapabilityIds } from '@/data/msAddOns';
+import { getAddOn } from '@/data/msAddOns';
 import { BASELINE_SKUS } from '@/data/skus';
+import { gapCategories, licencesForBaseline } from '@/data/standaloneLicences';
+import { cheapestCover, type CoverCandidate } from './licenceCover';
+
 import type {
   Assessment,
   Assumptions,
-  AvoidedCost,
+  AvoidedCapability,
+  AvoidedLicence,
   Bucket,
   BucketSummary,
+  CostAvoidance,
   DomainSummary,
   EngineResult,
+  LicenceOwnership,
   ScoredAddOn,
   ScoredLine,
   SpendLine,
@@ -255,49 +261,169 @@ function summariseDomains(lines: ScoredLine[]): DomainSummary[] {
 const sum = (xs: number[]) => xs.reduce((a, b) => a + b, 0);
 
 /**
- * Cost avoidance: capability the customer gets that they are not paying for today.
+ * Capability cost avoidance: what the customer would pay Microsoft to license, separately, the
+ * capabilities they plan to deploy that E7 includes and their current suite does not.
  *
- * A candidate is a category that (a) E7 newly unlocks or meaningfully upgrades for this
- * baseline, and (b) has no spend line against it. Condition (b) is what keeps this from
- * double-counting — the moment a category has a vendor and a number, it belongs in the cash
- * savings instead, and it drops out of here automatically.
+ * Every gap capability is priced on its own (the cheapest standalone licences that would provide
+ * just it) so the customer can choose. The selected capabilities are then priced together as the
+ * cheapest licence set that provides them all, because one suite licence often covers several.
+ * Prices are Microsoft list references less the assessment's E7 discount unless the customer
+ * enters one. Microsoft add-ons they already buy license their users at no extra cost, and a suite
+ * step-up is credited with the purchased add-ons it would replace, so nothing is counted twice.
  *
- * Priced at the catalog benchmark for the third-party products in the category, because there is
- * no customer figure to use by definition — and scaled by the share of the workforce that would
- * realistically hold a seat, so a $30 e-signature seat isn't charged to all 5,000 employees.
- * That makes it a softer number than the cash side, which is exactly why the caller must keep
- * it out of netAnnualImpact and out of the TCO.
+ * Third-party invoices on the same capability stay credited on the cash side and are flagged
+ * here. These are two separate lenses and must never be summed, which is why the caller keeps
+ * this out of netAnnualImpact, TCO and payback.
  */
-export function computeCostAvoidance(assessment: Assessment): AvoidedCost[] {
+export function computeCostAvoidance(
+  assessment: Assessment,
+  context: {
+    baselineAnnual: number;
+    addOnAnnualAbsorbed: number;
+    e7Annual: number;
+    e7NetPupm: number;
+    scoredLines: ScoredLine[];
+    scoredAddOns: ScoredAddOn[];
+  },
+): CostAvoidance {
   const seats = seatCount(assessment.seats);
-  const priced = new Set(assessment.lines.map((l) => l.categoryId));
-  for (const addOn of assessment.addOns) {
-    for (const id of getAddOnCapabilityIds(canonicalAddOnId(addOn.addOnId))) priced.add(id);
-  }
-  const planned = new Set(assessment.plannedCapabilities ?? []);
+  const discountPct = clampPct(assessment.assumptions.e7DiscountPct);
+  const userEdits = assessment.costAvoidance?.users ?? {};
+  const unitPrices = assessment.costAvoidance?.unitPrices ?? {};
+  const selectedIds = new Set(assessment.plannedCapabilities ?? []);
+  const gap = gapCategories(assessment.baseline);
+  const licences = licencesForBaseline(assessment.baseline);
 
-  return CATEGORIES.filter((c) => {
-    if (priced.has(c.id)) return false;
-    const cov = c.coverage[assessment.baseline];
-    return cov === 'unlocked' || cov === 'upgrade';
-  })
-    .map((category) => {
-      const adoptionPct = category.typicalAdoptionPct === undefined
-        ? 1
-        : clampUnit(category.typicalAdoptionPct);
-      const licensedSeats = Math.round(seats * adoptionPct);
-      return {
-        currency: 'USD' as const,
-        category,
-        coverage: category.coverage[assessment.baseline],
-        benchmarkPupm: nonNegative(category.benchmarkPupm),
-        adoptionPct,
-        licensedSeats,
-        avoidedAnnual: nonNegative(category.benchmarkPupm) * licensedSeats * 12,
-        selected: planned.has(category.id),
-      };
-    })
-    .sort((a, b) => b.avoidedAnnual - a.avoidedAnnual);
+  const owned = assessment.addOns.map((line, index) => ({
+    line,
+    id: canonicalAddOnId(line.addOnId),
+    seats: line.seats !== undefined ? seatCount(line.seats) : seats,
+    scored: context.scoredAddOns[index],
+  }));
+
+  const priced = licences.map((licence) => {
+    const owners = licence.addOnId
+      ? owned.filter((o) => o.id === licence.addOnId || containsAddOn(o.id, licence.addOnId!))
+      : [];
+    const ownedSeats = Math.min(seats, sum(owners.map((o) => o.seats)));
+    const superseded = licence.supersedesAddOnIds.length
+      ? owned.filter((o) => licence.supersedesAddOnIds.includes(o.id))
+      : [];
+    const supersededAnnual = sum(superseded.map((o) => (o.scored?.eligible ? o.scored.annualCredit : 0)));
+    const listPricePupm = unitPrice(licence.listPricePupm);
+    const defaultUnitPupm = listPricePupm * (1 - discountPct / 100);
+    const priceOverride = unitPrices[licence.id];
+    const unitPriceOverridden = validNumber(priceOverride, 100_000);
+    const unitPupm = unitPriceOverridden ? priceOverride : defaultUnitPupm;
+    return {
+      licence, owners, ownedSeats, superseded, listPricePupm, defaultUnitPupm, unitPupm, unitPriceOverridden,
+      candidate: {
+        id: licence.id,
+        grants: licence.capabilityIds,
+        unitPupm,
+        ownedSeats,
+        creditPupm: seats > 0 ? supersededAnnual / seats / 12 : 0,
+        requiresOneOf: licence.requiresOneOf[assessment.baseline] ?? [],
+      } satisfies CoverCandidate,
+    };
+  });
+  const candidates = priced.map((p) => p.candidate);
+  const byId = new Map(priced.map((p) => [p.licence.id, p]));
+
+  const cashOverlapFor = (ids: Set<string>) => context.scoredLines
+    .filter((l) => l.eligible && l.annualCredit > 0 && ids.has(l.category.id))
+    .map((l) => ({
+      categoryId: l.category.id,
+      categoryName: l.category.name,
+      vendor: l.line.vendor || l.category.name,
+      annualCredit: l.annualCredit,
+    }));
+
+  const capabilities = gap.map((category): AvoidedCapability => {
+    const edit = userEdits[category.id];
+    const usersOverridden = validNumber(edit, 5_000_000, true);
+    const users = usersOverridden ? edit : seats;
+    const alone = cheapestCover([{ id: category.id, users }], candidates);
+    const isPriced = alone.uncovered.length === 0;
+    const ownedVia = priced
+      .filter((p) => p.licence.capabilityIds.includes(category.id) && p.owners.length && p.ownedSeats >= users)
+      .flatMap((p) => p.owners.map((o) => getAddOn(o.id)?.name ?? o.id));
+    const benchmark = nonNegative(category.benchmarkPupm) *
+      (category.typicalAdoptionPct === undefined ? 1 : clampUnit(category.typicalAdoptionPct));
+    return {
+      category,
+      selected: selectedIds.has(category.id),
+      priced: isPriced,
+      defaultUsers: seats,
+      users,
+      usersOverridden,
+      standaloneLicenceIds: alone.lines.map((l) => l.id),
+      standaloneLicenceNames: alone.lines.map((l) => byId.get(l.id)!.licence.name),
+      standaloneAnnual: isPriced ? alone.annual : 0,
+      ownedVia: [...new Set(ownedVia)],
+      thirdPartyReferencePupm: benchmark,
+      thirdPartyReferenceAnnual: benchmark * users * 12,
+      cashOverlap: cashOverlapFor(new Set([category.id])),
+    };
+  });
+
+  const counted = capabilities.filter((c) => c.selected && c.priced);
+  const combined = cheapestCover(counted.map((c) => ({ id: c.category.id, users: c.users })), candidates);
+  const lines = combined.lines.map((line): AvoidedLicence => {
+    const p = byId.get(line.id)!;
+    const assigned = line.capabilityIds.map((id) => counted.find((c) => c.category.id === id)!.category);
+    const ownership: LicenceOwnership = p.owners.length === 0 ? 'none' : p.ownedSeats >= line.quantity ? 'full' : 'partial';
+    return {
+      currency: 'USD',
+      licence: p.licence,
+      capabilities: assigned,
+      prerequisiteFor: line.prerequisiteFor.map((id) => byId.get(id)!.licence),
+      listPricePupm: p.listPricePupm,
+      discountPct,
+      defaultUnitPupm: p.defaultUnitPupm,
+      unitPupm: p.unitPupm,
+      unitPriceOverridden: p.unitPriceOverridden,
+      quantity: line.quantity,
+      paidQuantity: line.paidQuantity,
+      ownership,
+      ownedSeats: p.ownedSeats,
+      ownedAddOnNames: [...new Set(p.owners.map((o) => getAddOn(o.id)?.name ?? o.id))],
+      supersededCredit: line.creditAnnual,
+      supersededAddOnNames: line.creditAnnual > 0 ? [...new Set(p.superseded.map((o) => getAddOn(o.id)?.name ?? o.id))] : [],
+      grossAnnual: line.grossAnnual,
+      annual: line.annual,
+      cashOverlap: cashOverlapFor(new Set(line.capabilityIds)),
+    };
+  });
+  for (const line of lines) {
+    for (const cat of line.capabilities) {
+      const cap = capabilities.find((c) => c.category.id === cat.id);
+      if (cap) cap.coveredByLicenceId = line.licence.id;
+    }
+  }
+
+  const annualAvoided = combined.annual;
+  const currentLicenceAnnual = context.baselineAnnual + context.addOnAnnualAbsorbed;
+  const buySeparatelyAnnual = currentLicenceAnnual + annualAvoided;
+  const perUser = (annual: number) => (seats > 0 ? annual / seats / 12 : 0);
+
+  return {
+    currency: 'USD',
+    capabilities,
+    lines,
+    selectedCount: capabilities.filter((c) => c.selected).length,
+    unpriced: capabilities.filter((c) => !c.priced).map((c) => c.category),
+    annualAvoided,
+    standaloneSumAnnual: sum(counted.map((c) => c.standaloneAnnual)),
+    thirdPartyReferenceAnnual: sum(counted.map((c) => c.thirdPartyReferenceAnnual)),
+    currentLicenceAnnual,
+    buySeparatelyAnnual,
+    buySeparatelyPupm: perUser(buySeparatelyAnnual),
+    e7Annual: context.e7Annual,
+    e7NetPupm: context.e7NetPupm,
+    bundleDifferenceAnnual: buySeparatelyAnnual - context.e7Annual,
+    bundleDifferencePupm: perUser(buySeparatelyAnnual - context.e7Annual),
+  };
 }
 
 export function buildMonthlyCashflow(opts: {
@@ -412,14 +538,12 @@ export function computeAssessment(assessment: Assessment): EngineResult {
 
   const migrationTotal = a.transitionEnabled === true ? Math.min(1e12, nonNegative(a.transitionCost)) : 0;
 
-  // Cost avoidance is computed and returned, but deliberately never folded into
-  // totalSavings / netAnnual / TCO. It is benchmark-priced capability the customer gains,
-  // not an invoice they stop paying, and mixing the two would make the headline unarguable.
-  const avoidedCosts = computeCostAvoidance(assessment);
-  const avoidedAnnualSelected = sum(
-    avoidedCosts.filter((x) => x.selected).map((x) => x.avoidedAnnual),
-  );
-  const avoidedAnnualAll = sum(avoidedCosts.map((x) => x.avoidedAnnual));
+  // Licence cost avoidance is computed and returned, but deliberately never folded into
+  // totalSavings / netAnnual / TCO. It is a licence counterfactual — what the customer would
+  // otherwise have to buy — not an invoice they stop paying.
+  const costAvoidance = computeCostAvoidance(assessment, {
+    baselineAnnual, addOnAnnualAbsorbed, e7Annual, e7NetPupm, scoredLines, scoredAddOns,
+  });
 
   const monthlyCashflow = buildMonthlyCashflow({
     horizonYears: a.horizonYears,
@@ -496,9 +620,7 @@ export function computeAssessment(assessment: Assessment): EngineResult {
     migrationTotal,
     tco,
     tcoNetBenefit: tco.length ? tco[tco.length - 1].cumulativeNetBenefit : 0,
-    avoidedCosts,
-    avoidedAnnualSelected,
-    avoidedAnnualAll,
+    costAvoidance,
   };
 }
 

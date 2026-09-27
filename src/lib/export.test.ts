@@ -31,6 +31,24 @@ describe('assessment exports', () => {
     expect(payload.summary.tcoNetBenefit).toBe(result.tcoNetBenefit);
   });
 
+  it('reports capability cost avoidance separately from the cash summary', () => {
+    const planned = { ...assessment, plannedCapabilities: ['genai-assistant', 'agent-governance', 'ztna'] };
+    const result = computeAssessment(planned);
+    const payload = buildJsonExport(planned, result);
+    expect(result.costAvoidance.annualAvoided).toBeGreaterThan(0);
+    expect(payload.summary.licenceCostAvoidedAnnual).toBe(result.costAvoidance.annualAvoided);
+    expect(payload.licenceCostAvoidance.licences.map((l) => l.licenceId)).toEqual(['copilot', 'agent-365', 'entra-suite']);
+    expect(payload.licenceCostAvoidance.buySeparatelyAnnual).toBe(result.costAvoidance.buySeparatelyAnnual);
+    const csv = buildCsvExport(planned, result);
+    expect(csv).toContain('Capability cost avoided with E7');
+    expect(csv).toContain(`Licence cost avoided / year,${result.costAvoidance.annualAvoided}`);
+    expect(csv).toContain('Buy separately minus E7 / year');
+
+    const eur = { ...planned, currency: 'EUR' };
+    const eurPayload = buildJsonExport(eur, computeAssessment(eur));
+    expect(eurPayload.licenceCostAvoidance).not.toHaveProperty('buySeparatelyAnnual');
+  });
+
   it('omits experimental study results when the user did not opt in', () => {
     const result = computeAssessment(assessment);
     const tei = computeTei(assessment, result);

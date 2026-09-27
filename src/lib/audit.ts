@@ -110,8 +110,9 @@ export function buildAuditLog(input: Assessment) {
       coverage: category.coverage[assessment.baseline],
       benchmarkCurrency: 'USD' as const,
       modeledAdoption: category.typicalAdoptionPct ?? 1,
-      planned: assessment.plannedCapabilities.includes(category.id),
-      currentPlannedEstimate: engine.avoidedCosts.find(row => row.category.id === category.id),
+      plannedForDeployment: (assessment.plannedCapabilities ?? []).includes(category.id),
+      currentAvoidedCapability: engine.costAvoidance.capabilities.find(cap => cap.category.id === category.id),
+      currentAvoidedLicence: engine.costAvoidance.lines.find(line => line.capabilities.some(c => c.id === category.id)),
     });
   });
   const addOns = MS_ADD_ONS.map(addOn => {
@@ -158,7 +159,7 @@ export function buildAuditLog(input: Assessment) {
     redundantToday: engine.buckets.find(bucket => bucket.bucket === 'already-redundant')?.conservativeCredit ?? 0,
     notCoveredAnnual: engine.buckets.find(bucket => bucket.bucket === 'not-covered')?.grossSpend ?? 0,
     capturedLines: assessment.lines.length,
-    avoidedSelected: engine.avoidedAnnualSelected,
+    avoidedLicenceAnnual: engine.costAvoidance.annualAvoided,
   };
   const battlecards = BATTLECARDS.map(card => searchable({
     id: `vendor:${card.vendor}`,
@@ -208,13 +209,18 @@ export function buildAuditLog(input: Assessment) {
       ['Best-case factors (deprecated; not applied)', JSON.stringify(a.bestCase)],
       ['Credit policy', 'Model v3 assumes full replacement of known USD amounts for covered invoices. Stored retained percentages, price confirmations and invoice confirmation flags do not alter credit. Unknown/not-covered invoices and unresolved duplicates or bundle overlaps earn no retirement credit. Source review status is unchanged.'],
     ]),
-    assumption('planned-capabilities', 'Planned capability selections — outside cash', [
-      ['Selected identifiers', assessment.plannedCapabilities.join(', ') || 'None selected'],
-      ['Selections present in current engine candidates', engine.avoidedCosts.filter(row => row.selected).map(row => row.category.id).join(', ') || 'None'],
-      ['Selected illustrative annual reference value', engine.avoidedAnnualSelected],
+    assumption('licence-cost-avoidance', 'Capability cost avoided with E7 — outside cash', [
+      ['Capabilities planned for deployment', engine.costAvoidance.capabilities.filter(cap => cap.selected).map(cap => cap.category.id).join(', ') || 'None'],
+      ['Licences in the lowest-cost set', engine.costAvoidance.lines.map(line => `${line.licence.id} × ${line.paidQuantity}`).join(', ') || 'None'],
+      ['User overrides by capability', JSON.stringify(assessment.costAvoidance?.users ?? {})],
+      ['Unit price overrides (USD / user / month)', JSON.stringify(assessment.costAvoidance?.unitPrices ?? {})],
+      ['E7 discount applied to list references (%)', a.e7DiscountPct],
+      ['Annual cost avoided (lowest-cost licence set)', engine.costAvoidance.annualAvoided],
+      ['Sum of each selected capability licensed on its own', engine.costAvoidance.standaloneSumAnnual],
+      ['Capabilities not valued', engine.costAvoidance.unpriced.map(c => c.id).join(', ') || 'None'],
       ['Reference currency', 'USD'],
-      ['Treatment', 'Illustrative, unverified planning value; never included in cash savings or TCO. No separate confirmation field is stored for these selections.'],
-    ], ['catalog-assumptions']),
+      ['Treatment', 'Licence counterfactual: for the capabilities the customer plans to deploy, the lowest-cost set of standalone Microsoft licences that would provide them on top of the current suite, at list reference less the E7 discount unless entered. A licence covering several selected capabilities is counted once, for the largest user count. Purchased Microsoft add-ons are not counted again. Never included in cash savings, TCO or payback, and never added to third-party retirement credit for the same capability. Step-up prices are approximated as suite list differences.'],
+    ], sourceIds(...engine.costAvoidance.lines.map(line => line.licence.sourceIds))),
     assumption('tei-settings', 'Experimental study settings and confirmations', [
       ['Experimental studies enabled', assessment.tei.enabled],
       ['Benefit overlap and implementation-cost review confirmed', assessment.tei.combinedReviewed],

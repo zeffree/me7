@@ -270,7 +270,21 @@ describe('planned capabilities', () => {
       expect(s.lines[0].assumptionConfirmed).toBe(false);
       expect(s.reviewWarnings?.join(' ')).toContain('Legacy invoice amounts were preserved');
       expect(s.reviewWarnings?.join(' ')).toContain('full replacement');
-      expect(JSON.parse(localStorage.getItem('me7-assessment')!).version).toBe(3);
+      expect(JSON.parse(localStorage.getItem('me7-assessment')!).version).toBe(4);
+    });
+
+    it('migrates version-three storage to capability cost avoidance without renewing TEI review', async () => {
+      localStorage.setItem('me7-assessment', JSON.stringify({
+        version: 3,
+        state: { ...sample, started: true, plannedCapabilities: ['ztna'], tei: { ...sample.tei, combinedReviewed: true }, reviewWarnings: [] },
+      }));
+      await useAssessment.persist.rehydrate();
+      const s = useAssessment.getState();
+      expect(s.plannedCapabilities).toEqual(['ztna']);
+      expect(s.costAvoidance).toEqual({ users: {}, unitPrices: {} });
+      expect(s.reviewWarnings?.join(' ')).toContain('Planned-capability selections are now valued');
+      expect(s.reviewWarnings?.join(' ')).not.toContain('Model 3 uses full replacement');
+      expect(s.tei.combinedReviewed).toBe(true);
     });
 
     it.each(['EUR', 'GBP', 'eur'])('recovers legacy %s storage without dropping or relabeling its money', async (currency) => {
@@ -296,7 +310,7 @@ describe('planned capabilities', () => {
       expect(toAssessment(useAssessment.getState())).toEqual(before);
       expect(useAssessment.getState().flash).toContain('Currency was not changed');
       const saved = JSON.parse(localStorage.getItem('me7-assessment')!);
-      expect(saved.version).toBe(3);
+      expect(saved.version).toBe(4);
       expect(saved.state.currency).toBe(currency);
       expect(saved.state.addOns[0].annual).toBe(7_654.32);
       await useAssessment.persist.rehydrate();
@@ -373,43 +387,69 @@ describe('planned capabilities', () => {
     expect(useAssessment.getState().plannedCapabilities).not.toContain('siem-soar');
   });
 
-  it('drops a planned capability as soon as spend is entered against it', () => {
-    useAssessment.setState({ baseline: 'm365e5' });
-    useAssessment.getState().dismissCategory('ztna');
-    useAssessment.getState().togglePlannedCapability('ztna');
-    expect(useAssessment.getState().plannedCapabilities).toContain('ztna');
-
-    useAssessment.getState().upsertLine({
-      categoryId: 'ztna',
-      vendor: 'Zscaler',
-      mode: 'pupm',
-      pupm: 9,
-      retainPct: 0,
-    });
-    expect(useAssessment.getState().plannedCapabilities).not.toContain('ztna');
-    expect(useAssessment.getState().dismissed).not.toContain('ztna');
-  });
-
-  it('toggles cleanly and never duplicates', () => {
+  it('toggles planned capabilities cleanly and ignores unknown ones', () => {
     const s = useAssessment.getState();
+    s.setPlannedCapabilities([]);
     s.togglePlannedCapability('ztna');
+    expect(useAssessment.getState().plannedCapabilities).toEqual(['ztna']);
     s.togglePlannedCapability('ztna');
-    expect(useAssessment.getState().plannedCapabilities).not.toContain('ztna');
-    s.togglePlannedCapability('ztna');
-    s.togglePlannedCapability('ztna');
-    s.togglePlannedCapability('ztna');
-    expect(
-      useAssessment.getState().plannedCapabilities.filter((p) => p === 'ztna'),
-    ).toHaveLength(1);
+    expect(useAssessment.getState().plannedCapabilities).toEqual([]);
+    s.togglePlannedCapability('not-a-capability');
+    expect(useAssessment.getState().plannedCapabilities).toEqual([]);
+    s.setPlannedCapabilities(['ztna', 'ztna', 'nope', 'genai-assistant']);
+    expect(useAssessment.getState().plannedCapabilities).toEqual(['ztna', 'genai-assistant']);
+    s.setPlannedCapabilities([]);
   });
 
-  it('rejects unknown category ids on bulk select', () => {
-    useAssessment.getState().setPlannedCapabilities(['ztna', 'not-a-real-category', 'ztna']);
-    expect(useAssessment.getState().plannedCapabilities).toEqual(['ztna']);
+  it('sets and clears user and price overrides within limits', () => {
+    const s = useAssessment.getState();
+    s.resetCostAvoidance();
+    s.setCapabilityUsers('genai-assistant', 250);
+    s.setAvoidedLicencePrice('copilot', 24.5);
+    s.setCapabilityUsers('genai-assistant', 1.5);
+    s.setCapabilityUsers('not-a-capability', 10);
+    s.setAvoidedLicencePrice('copilot', -1);
+    s.setAvoidedLicencePrice('not-a-licence', 5);
+    expect(useAssessment.getState().costAvoidance).toEqual({ users: { 'genai-assistant': 250 }, unitPrices: { copilot: 24.5 } });
+    s.setCapabilityUsers('genai-assistant', undefined);
+    s.setAvoidedLicencePrice('copilot', undefined);
+    expect(useAssessment.getState().costAvoidance).toEqual({ users: {}, unitPrices: {} });
   });
 
-  it('survives a share round-trip', () => {
-    useAssessment.getState().hydrate({ ...sample, plannedCapabilities: ['ztna'] });
+  it('keeps the capability selection when restoring default users and prices', () => {
+    const s = useAssessment.getState();
+    s.setPlannedCapabilities(['ztna']);
+    s.setCapabilityUsers('ztna', 10);
+    s.resetCostAvoidance();
     expect(useAssessment.getState().plannedCapabilities).toEqual(['ztna']);
+    expect(useAssessment.getState().costAvoidance).toEqual({ users: {}, unitPrices: {} });
+    s.setPlannedCapabilities([]);
+  });
+
+  it('keeps entering spend separate from capability cost avoidance', () => {
+    useAssessment.getState().resetCostAvoidance();
+    useAssessment.getState().setPlannedCapabilities([]);
+    useAssessment.getState().upsertLine({ categoryId: 'ztna', vendor: 'Zscaler', mode: 'pupm', pupm: 9, retainPct: 0 });
+    expect(useAssessment.getState().plannedCapabilities).toEqual([]);
+    expect(useAssessment.getState().costAvoidance).toEqual({ users: {}, unitPrices: {} });
+  });
+
+  it('survives a share round-trip and only warns about selections saved before the rework', () => {
+    const costAvoidance = { users: { ztna: 10 }, unitPrices: { 'entra-suite': 9 } };
+    useAssessment.getState().hydrate({ ...sample, plannedCapabilities: ['ztna'], costAvoidance });
+    expect(useAssessment.getState().plannedCapabilities).toEqual(['ztna']);
+    expect(useAssessment.getState().costAvoidance).toEqual(costAvoidance);
+    expect(useAssessment.getState().reviewWarnings?.join(' ') ?? '').not.toContain('Planned-capability selections are now valued');
+    useAssessment.getState().hydrate({ ...sample, plannedCapabilities: ['ztna'], costAvoidance: undefined });
+    expect(useAssessment.getState().reviewWarnings?.join(' ')).toContain('Planned-capability selections are now valued');
+  });
+
+  it('rejects unknown identities and invalid overrides on import', () => {
+    const before = useAssessment.getState().orgName;
+    useAssessment.getState().hydrate({ ...sample, orgName: 'Rejected', costAvoidance: { users: { nope: 5 }, unitPrices: {} } });
+    expect(useAssessment.getState().orgName).toBe(before);
+    expect(useAssessment.getState().flash).toContain('unknown capability identity');
+    useAssessment.getState().hydrate({ ...sample, orgName: 'Rejected', costAvoidance: { users: {}, unitPrices: { copilot: -5 } } });
+    expect(useAssessment.getState().orgName).toBe(before);
   });
 });

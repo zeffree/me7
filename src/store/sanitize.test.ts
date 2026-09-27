@@ -93,6 +93,20 @@ describe('sanitizeAssessment', () => {
     expect(clean.addOns).toHaveLength(1);
   });
 
+  it('keeps valid capability cost-avoidance settings and drops unknown or unusable ones', () => {
+    const clean = sanitizeAssessment({
+      costAvoidance: {
+        users: { 'genai-assistant': 250, ztna: 1.5, dlp: -1, ghost: 10, copilot: 5 },
+        unitPrices: { copilot: 24.5, 'agent-365': Infinity, ghost: 3, 'genai-assistant': 4 },
+      },
+    } as unknown as Assessment);
+    expect(clean.costAvoidance).toEqual({ users: { 'genai-assistant': 250 }, unitPrices: { copilot: 24.5 } });
+    expect(sanitizeAssessment({ costAvoidance: 'nonsense' } as unknown as Assessment).costAvoidance)
+      .toEqual({ users: {}, unitPrices: {} });
+    expect(sanitizeAssessment({ costAvoidance: { excluded: ['copilot'], quantities: { copilot: 9 } } } as unknown as Assessment).costAvoidance)
+      .toEqual({ users: {}, unitPrices: {} });
+  });
+
   it('preserves currency and audit-only legacy flags without applying them to USD credit', () => {
     const clean = sanitizeAssessment({
       currency: 'USD',

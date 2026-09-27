@@ -63,10 +63,57 @@ export function buildJsonExport(assessment: Assessment, result: EngineResult, te
       paybackMonths: result.paybackMonths,
       paybackStatus: result.paybackStatus,
       tcoNetBenefit: result.tcoNetBenefit,
-      // Reported separately, and never added to the figures above: this is capability value
-      // gained at benchmark prices, not cash removed from the P&L.
-      avoidedAnnualSelected: result.avoidedAnnualSelected,
-      avoidedCostCurrency: 'USD',
+      // Reported separately, and never added to the figures above: this is the Microsoft licence
+      // spend the customer would otherwise need for the E7 capabilities they plan to deploy, not
+      // cash removed from the P&L.
+      licenceCostAvoidedAnnual: result.costAvoidance.annualAvoided,
+      licenceCostAvoidedCurrency: 'USD',
+    },
+    licenceCostAvoidance: {
+      currency: 'USD',
+      note: 'Licence counterfactual: the lowest-cost standalone Microsoft licences for the E7 capabilities the customer plans to deploy. Not cash savings; excluded from net impact, TCO and payback. Never add to third-party retirement credit for the same capability.',
+      annualAvoided: result.costAvoidance.annualAvoided,
+      standaloneSumAnnual: result.costAvoidance.standaloneSumAnnual,
+      ...(assessment.currency === 'USD' ? {
+        buySeparatelyAnnual: result.costAvoidance.buySeparatelyAnnual,
+        e7Annual: result.costAvoidance.e7Annual,
+        bundleDifferenceAnnual: result.costAvoidance.bundleDifferenceAnnual,
+      } : {}),
+      unpricedCategoryIds: result.costAvoidance.unpriced.map((c) => c.id),
+      capabilities: result.costAvoidance.capabilities.map((cap) => ({
+        categoryId: cap.category.id,
+        name: cap.category.name,
+        selected: cap.selected,
+        priced: cap.priced,
+        users: cap.users,
+        usersOverridden: cap.usersOverridden,
+        standaloneLicenceIds: cap.standaloneLicenceIds,
+        standaloneAnnual: cap.standaloneAnnual,
+        coveredByLicenceId: cap.coveredByLicenceId ?? null,
+        thirdPartyReferenceAnnual: cap.thirdPartyReferenceAnnual,
+        cashOverlapVendors: cap.cashOverlap.map((o) => o.vendor),
+      })),
+      licences: result.costAvoidance.lines.map((line) => ({
+        licenceId: line.licence.id,
+        name: line.licence.name,
+        kind: line.licence.kind,
+        capabilityIds: line.capabilities.map((c) => c.id),
+        prerequisiteForLicenceIds: line.prerequisiteFor.map((l) => l.id),
+        listPricePupm: line.listPricePupm,
+        discountPct: line.discountPct,
+        unitPupm: line.unitPupm,
+        unitPriceOverridden: line.unitPriceOverridden,
+        quantity: line.quantity,
+        paidQuantity: line.paidQuantity,
+        ownership: line.ownership,
+        ownedSeats: line.ownedSeats,
+        supersededCredit: line.supersededCredit,
+        grossAnnual: line.grossAnnual,
+        annual: line.annual,
+        cashOverlapCategoryIds: line.cashOverlap.map((o) => o.categoryId),
+        priceBasis: line.licence.priceBasis,
+        sourceIds: line.licence.sourceIds,
+      })),
     },
     cashflow: {
       currency: assessment.currency,
@@ -98,12 +145,6 @@ export function buildJsonExport(assessment: Assessment, result: EngineResult, te
         annualCredit: scored.annualCredit,
         coverage: getAddOnEvidence(scored.addOnId),
         referencePrice: getAddOnPriceEvidence(scored.addOnId),
-      })),
-      avoidedCosts: result.avoidedCosts.filter((item) => item.selected).map((item) => ({
-        categoryId: item.category.id,
-        currency: 'USD',
-        annualReferenceValue: item.avoidedAnnual,
-        benchmark: getBenchmarkEvidence(item.category.id),
       })),
     },
     // Only present when the user opted in. Deliberately a sibling of `summary` rather than a
@@ -236,7 +277,6 @@ export function buildCsvExport(assessment: Assessment, result: EngineResult, tei
     'Annual spend',
     'Modeled retained %',
     'Recoverable',
-    'Cost avoided',
     'Contract ends',
     'Currency',
     'Amount source',
@@ -259,7 +299,6 @@ export function buildCsvExport(assessment: Assessment, result: EngineResult, tei
     l.annualSpend,
     l.eligible ? 0 : 100,
     l.conservativeCredit,
-    0,
     l.line.contractEnd ?? '',
     assessment.currency,
     l.line.amountSource ?? 'unspecified',
@@ -279,7 +318,6 @@ export function buildCsvExport(assessment: Assessment, result: EngineResult, tei
     a.annualSpend,
     a.eligible ? 0 : 100,
     a.annualCredit,
-    0,
     '',
     assessment.currency,
     a.line.amountSource ?? 'unspecified',
@@ -290,27 +328,50 @@ export function buildCsvExport(assessment: Assessment, result: EngineResult, tei
     a.exclusionReason ?? '',
   ]);
 
-  const avoidedRows = result.avoidedCosts
-    .filter((x) => x.selected)
-    .map((x) => [
-      getDomain(x.category.domain)?.name ?? x.category.domain,
-      x.category.name,
-      '(none today)',
-      'Cost avoided — new capability',
-      x.category.confidence,
-      0,
-      0,
-      0,
-      x.avoidedAnnual,
-      '',
-      'USD',
-      'Reference benchmark (not cash)',
-      '',
-      'Explicitly selected',
-      'Not cash savings',
-      ...evidenceCells(getBenchmarkEvidence(x.category.id)),
-      '',
-    ]);
+  const c = result.costAvoidance;
+  const avoidance = [
+    [],
+    ['Capability cost avoided with E7 (licence counterfactual, not cash saved — do not add to net impact, TCO or payback)'],
+    ['Reference currency', 'USD'],
+    ['Capability', 'Planned', 'Users', 'Users source', 'Cheapest licences on its own', 'On its own USD / year', 'In the lowest-cost set via', 'Third-party reference (context only)', 'Cash overlap (do not add)'],
+    ...c.capabilities.map((cap) => [
+      cap.category.name,
+      cap.selected ? 'yes' : 'no',
+      cap.users,
+      cap.usersOverridden ? 'Entered' : 'All seats',
+      cap.priced ? cap.standaloneLicenceNames.join(' + ') || 'Already licensed' : 'Not priced',
+      cap.standaloneAnnual,
+      cap.coveredByLicenceId ? c.lines.find((l) => l.licence.id === cap.coveredByLicenceId)?.licence.name ?? '' : '',
+      cap.thirdPartyReferenceAnnual,
+      cap.cashOverlap.map((o) => o.vendor).join('; '),
+    ]),
+    [],
+    ['Licence', 'Kind', 'Capabilities', 'Prerequisite for', 'List USD / user / month', 'E7 discount %', 'Unit USD / user / month', 'Price source', 'Users needed', 'Already licensed seats', 'Users paid for', 'Replaced add-on credit', 'Annual licence cost avoided', 'Source IDs'],
+    ...c.lines.map((line) => [
+      line.licence.name,
+      line.licence.kind,
+      line.capabilities.map((cat) => cat.name).join('; '),
+      line.prerequisiteFor.map((l) => l.name).join('; '),
+      line.listPricePupm,
+      line.discountPct,
+      line.unitPupm,
+      line.unitPriceOverridden ? 'Entered' : 'List less E7 discount',
+      line.quantity,
+      line.ownedSeats,
+      line.paidQuantity,
+      line.supersededCredit,
+      line.annual,
+      line.licence.sourceIds.join('; '),
+    ]),
+    ['Licence cost avoided / year', c.annualAvoided],
+    ['Each selected capability licensed on its own / year', c.standaloneSumAnnual],
+    ...(c.unpriced.length ? [['Capabilities not valued', c.unpriced.map((cat) => cat.name).join('; ')]] : []),
+    ...(assessment.currency === 'USD' ? [
+      ['Buy separately / year', c.buySeparatelyAnnual],
+      ['E7 / year', c.e7Annual],
+      ['Buy separately minus E7 / year', c.bundleDifferenceAnnual],
+    ] : [['Buy separately vs E7', 'Withheld: assessment is not USD and no FX conversion is applied']]),
+  ];
 
   const summary = [
     [],
@@ -341,15 +402,12 @@ export function buildCsvExport(assessment: Assessment, result: EngineResult, tei
     ['Cash flow', assessment.currency],
     ['Year', 'Current annual cost', 'Future annual cost including transition', 'Net benefit', 'Cumulative benefit'],
     ...result.tco.map((year) => [year.year, year.currentCost, year.e7Cost, year.netBenefit, year.cumulativeNetBenefit]),
-    [],
-    ['Cost avoided (capability gained, not cash saved — do not add to net impact)'],
-    ['Reference currency', 'USD'],
-    ['Annual reference value of selected capabilities', result.avoidedAnnualSelected],
+    ...avoidance,
     [],
     ['Estimator only. Not a Microsoft quote. Full replacement is a scenario assumption, not proof of entitlement or cancellation.'],
   ];
 
-  return [header, ...rows, ...addOnRows, ...avoidedRows, ...summary, ...teiCsvBlock(tei)]
+  return [header, ...rows, ...addOnRows, ...summary, ...teiCsvBlock(tei)]
     .map((r) => r.map(csvCell).join(','))
     .join('\n');
 }

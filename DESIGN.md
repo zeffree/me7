@@ -359,7 +359,7 @@ The signature ledger always compares current and future recurring cost, then lab
 
 ### Optional material
 
-Planned capability value is explicitly selected and stays in USD outside cash totals. TEI is off by default and presented per study; combined results require the model's overlap and currency gates.
+Capability cost avoided with E7 is a USD licence counterfactual, led by capability: the customer selects what they plan to deploy (nothing by default), each capability shows its standalone licence cost, and the selected set is itemised as the lowest-cost licences that provide it. It is shown as a distinct, labelled figure outside cash totals, TCO and payback. Its buy-separately versus E7 comparison appears only for USD assessments. Third-party benchmarks are secondary context and are never summed with it or with retirement credit for the same capability. TEI is off by default and presented per study; combined results require the model's overlap and currency gates.
 
 Presenter content is a ruled briefing sheet, not a padded disclosure nested in a card. Align guide labels with a definition-list grid and keep long text within the reading measure. Paired proportional cost bars, a current-to-E7 capability route and calculated cash milestones explain the case. On phones these graphics stack; dense workshop and invoice tables scroll within their own wrapper. The briefing is truthful about cost increases and existing-baseline opportunities. Expanded presenter material prints only after opt-in.
 
@@ -402,7 +402,7 @@ Discovery marks require an interaction and an explored comparison; they acknowle
 - **Don't** hide counted invoices behind baseline relevance filters.
 - **Don't** equate suite inclusion with a cancellable invoice.
 - **Don't** call an offset-adjusted comparison a licence price.
-- **Don't** add study or unpurchased capability value to cash savings.
+- **Don't** add study value or capability cost avoided to cash savings, TCO or payback.
 - **Don't** claim local saving, privacy or confidentiality that the application cannot establish.
 - **Don't** propagate the lab's palette or type ramp into the assessment or technical map.
 - **Don't** turn discovery marks into certification, tenant readiness or an efficiency score.

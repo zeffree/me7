@@ -605,111 +605,184 @@ describe('edge cases', () => {
   });
 });
 
-describe('cost avoidance', () => {
-  // Cost avoidance answers a different question from the rest of the engine: not "what do you
-  // stop paying" but "what would you have had to buy". It is benchmark-priced and therefore
-  // softer than the cash side, so these tests exist mainly to prove it never leaks into the
-  // cash figures.
-  it('offers only capabilities E7 unlocks or upgrades for this baseline', () => {
-    const r = computeAssessment(makeAssessment('m365e5'));
-    for (const a of r.avoidedCosts) {
-      expect(['unlocked', 'upgrade']).toContain(a.category.coverage.m365e5);
+
+describe('capability cost avoidance', () => {
+  // Cost avoidance answers "what would licensing the capabilities you plan to deploy cost if E7
+  // did not include them", priced as the cheapest set of standalone Microsoft licences at list
+  // reference less the E7 discount. It is a counterfactual, never cash, so beyond the arithmetic
+  // these tests prove it cannot leak into the cash figures.
+  const annual = (pupm: number, seats = 1000) => pupm * seats * 12;
+  const gapIds = (baseline: 'o365e3' | 'm365e3' | 'm365e5') =>
+    CATEGORIES.filter((cat) => ['unlocked', 'upgrade'].includes(cat.coverage[baseline])).map((cat) => cat.id);
+  const avoid = (baseline: 'o365e3' | 'm365e3' | 'm365e5', plannedCapabilities: string[], overrides: Partial<Assessment> = {}) =>
+    computeAssessment(makeAssessment(baseline, { plannedCapabilities, ...overrides })).costAvoidance;
+  const ids = (c: { lines: { licence: { id: string } }[] }) => c.lines.map((l) => l.licence.id);
+
+  it('counts nothing until the customer selects capabilities, but prices each one on its own', () => {
+    const c = avoid('m365e5', []);
+    expect(c.annualAvoided).toBe(0);
+    expect(c.lines).toEqual([]);
+    expect(c.capabilities.map((cap) => cap.category.id).sort()).toEqual(gapIds('m365e5').sort());
+    const copilot = c.capabilities.find((cap) => cap.category.id === 'genai-assistant')!;
+    expect(copilot.standaloneLicenceIds).toEqual(['copilot']);
+    expect(copilot.standaloneAnnual).toBeCloseTo(annual(30), 6);
+    expect(c.currency).toBe('USD');
+  });
+
+  it('prices every E7 capability like the E7 components for an E5 customer', () => {
+    const c = avoid('m365e5', gapIds('m365e5'));
+    expect(ids(c)).toEqual(['copilot', 'agent-365', 'entra-suite']);
+    expect(c.annualAvoided).toBeCloseTo(annual(30 + 15 + 12), 6);
+  });
+
+  it('finds the E5 step-up when every capability is selected on E3 suites', () => {
+    const m365 = avoid('m365e3', gapIds('m365e3'));
+    expect(ids(m365)).toContain('m365e5-step-up-m365e3');
+    expect(m365.annualAvoided).toBeCloseTo(annual(21 + 57), 6);
+    const o365 = avoid('o365e3', gapIds('o365e3'));
+    expect(ids(o365)).toContain('m365e5-step-up-o365e3');
+    expect(o365.annualAvoided).toBeCloseTo(annual(34 + 57), 6);
+  });
+
+  it('prices a single capability with its cheapest licence only', () => {
+    const c = avoid('m365e3', ['edr-xdr']);
+    expect(ids(c)).toEqual(['defender-endpoint-p2']);
+    expect(c.annualAvoided).toBeCloseTo(annual(5.2), 6);
+  });
+
+  it('counts a licence shared by several capabilities once', () => {
+    const c = avoid('m365e5', ['genai-assistant', 'enterprise-search']);
+    expect(ids(c)).toEqual(['copilot']);
+    expect(c.lines[0].capabilities.map((cat) => cat.id).sort()).toEqual(['enterprise-search', 'genai-assistant']);
+    expect(c.annualAvoided).toBeCloseTo(annual(30), 6);
+    expect(c.standaloneSumAnnual).toBeCloseTo(annual(60), 6);
+    expect(c.capabilities.find((cap) => cap.category.id === 'genai-assistant')!.coveredByLicenceId).toBe('copilot');
+  });
+
+  it('switches to a suite when it is cheaper than the individual products', () => {
+    const c = avoid('m365e3', ['edr-xdr', 'email-security', 'itdr', 'casb']);
+    expect(ids(c)).toEqual(['m365-e5-security']);
+    expect(c.annualAvoided).toBeCloseTo(annual(12), 6);
+    expect(c.standaloneSumAnnual).toBeCloseTo(annual(5.2 + 5 + 5.5 + 5), 6);
+  });
+
+  it('sizes each licence to the users planned for its capabilities', () => {
+    const c = avoid('m365e5', ['genai-assistant', 'enterprise-search'], {
+      costAvoidance: { users: { 'genai-assistant': 200, 'enterprise-search': 500 }, unitPrices: {} },
+    });
+    expect(c.lines[0].quantity).toBe(500);
+    expect(c.annualAvoided).toBeCloseTo(annual(30, 500), 6);
+    const alone = c.capabilities.find((cap) => cap.category.id === 'genai-assistant')!;
+    expect(alone.usersOverridden).toBe(true);
+    expect(alone.standaloneAnnual).toBeCloseTo(annual(30, 200), 6);
+  });
+
+  it('adds a prerequisite licence when the suite lacks it', () => {
+    const c = avoid('o365e3', ['ztna']);
+    expect(ids(c).sort()).toEqual(['entra-id-p1', 'entra-suite']);
+    const p1 = c.lines.find((l) => l.licence.id === 'entra-id-p1')!;
+    expect(p1.prerequisiteFor.map((l) => l.id)).toEqual(['entra-suite']);
+    expect(c.annualAvoided).toBeCloseTo(annual(12 + 7), 6);
+    expect(avoid('m365e3', ['ztna']).annualAvoided).toBeCloseTo(annual(12), 6);
+  });
+
+  it('applies the E7 discount to list references by default', () => {
+    const c = avoid('m365e5', gapIds('m365e5'), {
+      assumptions: { ...DEFAULT_ASSUMPTIONS, baselineUnitPupm: 60, e7DiscountPct: 20 },
+    });
+    expect(c.lines[0].defaultUnitPupm).toBeCloseTo(24, 6);
+    expect(c.annualAvoided).toBeCloseTo(annual(57 * 0.8), 6);
+  });
+
+  it('uses entered prices, which can change the cheapest licences', () => {
+    const c = avoid('m365e3', ['edr-xdr'], { costAvoidance: { users: {}, unitPrices: { 'defender-endpoint-p2': 20 } } });
+    expect(ids(c)).toEqual(['m365-e5-security']);
+    const entered = avoid('m365e3', ['edr-xdr'], { costAvoidance: { users: {}, unitPrices: { 'defender-endpoint-p2': 4 } } });
+    expect(entered.lines[0].unitPriceOverridden).toBe(true);
+    expect(entered.annualAvoided).toBeCloseTo(annual(4), 6);
+  });
+
+  it('does not count licences the customer already buys', () => {
+    const partial = avoid('m365e5', ['genai-assistant'], {
+      addOns: [{ addOnId: 'copilot', mode: 'pupm', pupm: 30, seats: 400 }],
+    });
+    expect(partial.lines[0].ownership).toBe('partial');
+    expect(partial.lines[0].paidQuantity).toBe(600);
+    expect(partial.annualAvoided).toBeCloseTo(annual(30, 600), 6);
+
+    const full = avoid('m365e5', ['genai-assistant'], { addOns: [{ addOnId: 'copilot', mode: 'pupm', pupm: 30 }] });
+    expect(full.annualAvoided).toBe(0);
+    expect(full.capabilities.find((cap) => cap.category.id === 'genai-assistant')!.ownedVia).toEqual(['Microsoft 365 Copilot']);
+  });
+
+  it('credits a step-up with the purchased add-ons it would replace', () => {
+    const r = computeAssessment(makeAssessment('m365e3', {
+      plannedCapabilities: ['dlp'],
+      addOns: [{ addOnId: 'm365-e5-security', mode: 'pupm', pupm: 12 }],
+    }));
+    const credit = r.scoredAddOns[0].annualCredit;
+    expect(credit).toBeCloseTo(annual(12), 6);
+    const stepUp = r.costAvoidance.lines.find((l) => l.licence.kind === 'step-up')!;
+    expect(stepUp).toBeDefined();
+    expect(stepUp.supersededCredit).toBeCloseTo(credit, 6);
+    expect(r.costAvoidance.annualAvoided).toBeCloseTo(annual(21 - 12), 6);
+  });
+
+  it('flags third-party spend on the same capability without removing it', () => {
+    const r = computeAssessment(makeAssessment('m365e5', {
+      plannedCapabilities: ['ztna'],
+      lines: [line({ categoryId: 'ztna', pupm: 9 })],
+    }));
+    const cap = r.costAvoidance.capabilities.find((c) => c.category.id === 'ztna')!;
+    expect(cap.cashOverlap.map((o) => o.categoryId)).toEqual(['ztna']);
+    expect(r.costAvoidance.lines[0].cashOverlap.map((o) => o.categoryId)).toEqual(['ztna']);
+    expect(r.costAvoidance.annualAvoided).toBeGreaterThan(0);
+    expect(r.thirdPartyCreditConservative).toBeGreaterThan(0);
+  });
+
+  it('credits each selected capability to exactly one licence and never values unpriced ones', () => {
+    for (const baseline of ['o365e3', 'm365e3', 'm365e5'] as const) {
+      const c = avoid(baseline, gapIds(baseline));
+      const credited = c.lines.flatMap((l) => l.capabilities.map((cat) => cat.id));
+      expect(new Set(credited).size).toBe(credited.length);
+      expect([...credited, ...c.unpriced.map((cat) => cat.id)].sort()).toEqual(gapIds(baseline).sort());
+      expect(c.annualAvoided).toBeLessThanOrEqual(c.standaloneSumAnnual + 1e-6);
     }
-    expect(r.avoidedCosts.length).toBeGreaterThan(0);
+    const unpriced = avoid('m365e5', ['webinars-events']);
+    expect(unpriced.unpriced.map((cat) => cat.id)).toContain('webinars-events');
+    expect(unpriced.annualAvoided).toBe(0);
   });
 
-  it('offers an E3 customer far more new capability than an E5 customer', () => {
-    const e3 = computeAssessment(makeAssessment('o365e3'));
-    const e5 = computeAssessment(makeAssessment('m365e5'));
-    expect(e3.avoidedCosts.length).toBeGreaterThan(e5.avoidedCosts.length);
+  it('compares buying the selected capabilities separately with E7', () => {
+    const c = avoid('m365e5', gapIds('m365e5'));
+    expect(c.currentLicenceAnnual).toBeCloseTo(annual(60), 6);
+    expect(c.buySeparatelyAnnual).toBeCloseTo(annual(60 + 57), 6);
+    expect(c.e7Annual).toBeCloseTo(annual(99), 6);
+    expect(c.bundleDifferenceAnnual).toBeCloseTo(annual(18), 6);
+    expect(c.bundleDifferencePupm).toBeCloseTo(18, 6);
   });
 
-  it('prices a selected capability at benchmark x licensed seats x 12', () => {
-    const cat = CATEGORIES.find(
-      (c) => c.coverage.m365e5 === 'unlocked' && c.benchmarkPupm > 0,
-    )!;
-    const r = computeAssessment(
-      makeAssessment('m365e5', { plannedCapabilities: [cat.id] }),
-    );
-    const licensed = Math.round(1000 * (cat.typicalAdoptionPct ?? 1));
-    expect(r.avoidedAnnualSelected).toBeCloseTo(cat.benchmarkPupm * licensed * 12, 6);
+  it('keeps third-party benchmarks as context only', () => {
+    const c = avoid('m365e5', gapIds('m365e5'));
+    expect(c.thirdPartyReferenceAnnual).toBeGreaterThan(0);
+    expect(c.annualAvoided).toBeCloseTo(annual(57), 6);
   });
 
-  it('charges specialist tools to a subset of staff, not the whole workforce', () => {
-    // A $30 e-signature seat is not bought for all 5,000 employees. Categories that carry a
-    // typicalAdoptionPct must price avoidance below the naive benchmark x all-seats figure.
-    const subset = CATEGORIES.filter(
-      (c) => (c.typicalAdoptionPct ?? 1) < 1 && c.benchmarkPupm > 0,
-    );
-    expect(subset.length).toBeGreaterThan(0);
-
-    for (const cat of subset) {
-      const r = computeAssessment(makeAssessment('o365e3', { plannedCapabilities: [cat.id] }));
-      const row = r.avoidedCosts.find((a) => a.category.id === cat.id);
-      if (!row) continue;
-      expect(row.licensedSeats).toBeLessThan(1000);
-      expect(row.avoidedAnnual).toBeLessThan(cat.benchmarkPupm * 1000 * 12);
-      expect(row.avoidedAnnual).toBeCloseTo(cat.benchmarkPupm * row.licensedSeats * 12, 6);
-    }
+  it('reports nothing for a zero-seat org', () => {
+    const c = avoid('m365e5', gapIds('m365e5'), { seats: 0 });
+    expect(c.annualAvoided).toBe(0);
+    expect(c.bundleDifferencePupm).toBe(0);
   });
 
-  it('defaults org-wide categories to every seat', () => {
-    const cat = CATEGORIES.find(
-      (c) =>
-        c.coverage.o365e3 === 'unlocked' &&
-        c.benchmarkPupm > 0 &&
-        c.typicalAdoptionPct === undefined,
-    )!;
-    const r = computeAssessment(makeAssessment('o365e3', { plannedCapabilities: [cat.id] }));
-    const row = r.avoidedCosts.find((a) => a.category.id === cat.id)!;
-    expect(row.adoptionPct).toBe(1);
-    expect(row.licensedSeats).toBe(1000);
-  });
-
-  it('counts only selected capabilities, not every candidate', () => {
-    const r = computeAssessment(makeAssessment('m365e5'));
-    expect(r.avoidedAnnualSelected).toBe(0);
-    expect(r.avoidedAnnualAll).toBeGreaterThan(0);
-  });
-
-  it('drops a capability from avoidance once it has real spend against it', () => {
-    // The same capability must never be both a cash saving and an avoided cost.
-    const withSpend = computeAssessment(
-      makeAssessment('m365e5', {
-        lines: [line({ categoryId: 'ztna', pupm: 9 })],
-        plannedCapabilities: ['ztna'],
-      }),
-    );
-    expect(withSpend.avoidedCosts.some((a) => a.category.id === 'ztna')).toBe(false);
-    expect(withSpend.avoidedAnnualSelected).toBe(0);
-    expect(withSpend.thirdPartyCreditConservative).toBeGreaterThan(0);
-  });
-
-  it('never lets avoided cost touch the cash figures', () => {
-    const plain = computeAssessment(makeAssessment('m365e5'));
-    const planned = computeAssessment(
-      makeAssessment('m365e5', { plannedCapabilities: ['agent-governance'] }),
-    );
-    expect(planned.avoidedAnnualSelected).toBeGreaterThan(0);
-    expect(planned.netAnnualConservative).toBe(plain.netAnnualConservative);
-    expect(planned.currentAnnualTotal).toBe(plain.currentAnnualTotal);
-    expect(planned.effectiveNetPupmConservative).toBe(plain.effectiveNetPupmConservative);
-    expect(planned.tcoNetBenefit).toBe(plain.tcoNetBenefit);
-  });
-
-  it('ignores a planned capability that is not a candidate', () => {
-    // siem-soar is not covered by E7 at all, so claiming it as gained value would be a lie.
-    const r = computeAssessment(
-      makeAssessment('m365e5', { plannedCapabilities: ['siem-soar'] }),
-    );
-    expect(r.avoidedCosts.some((a) => a.category.id === 'siem-soar')).toBe(false);
-    expect(r.avoidedAnnualSelected).toBe(0);
-  });
-
-  it('scales with seats and reports nothing for a zero-seat org', () => {
-    const r = computeAssessment(
-      makeAssessment('m365e5', { seats: 0, plannedCapabilities: ['agent-governance'] }),
-    );
-    expect(r.avoidedAnnualSelected).toBe(0);
+  it('never lets capability cost avoidance touch the cash figures', () => {
+    const counted = computeAssessment(makeAssessment('m365e3', { plannedCapabilities: gapIds('m365e3') }));
+    const none = computeAssessment(makeAssessment('m365e3'));
+    expect(counted.costAvoidance.annualAvoided).toBeGreaterThan(0);
+    expect(none.costAvoidance.annualAvoided).toBe(0);
+    expect(counted.netAnnualConservative).toBe(none.netAnnualConservative);
+    expect(counted.currentAnnualTotal).toBe(none.currentAnnualTotal);
+    expect(counted.effectiveNetPupmConservative).toBe(none.effectiveNetPupmConservative);
+    expect(counted.tcoNetBenefit).toBe(none.tcoNetBenefit);
+    expect(counted.paybackStatus).toBe(none.paybackStatus);
   });
 });

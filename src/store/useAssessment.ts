@@ -2,10 +2,11 @@ import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 import { DEFAULT_ASSUMPTIONS } from '@/model/engine';
 import { DEFAULT_TEI_SETTINGS } from '@/model/tei';
-import type { AddOnLine, Assessment, Assumptions, SpendLine, TeiSettings } from '@/model/types';
+import type { AddOnLine, Assessment, Assumptions, CostAvoidanceSettings, SpendLine, TeiSettings } from '@/model/types';
 import { BASELINE_SKUS, getBaseline, type BaselineSkuId } from '@/data/skus';
 import { getCategory } from '@/data/categories';
 import { getAddOn } from '@/data/msAddOns';
+import { getStandaloneLicence } from '@/data/standaloneLicences';
 import { getTeiLine } from '@/data/teiStudies';
 import { createDemoAssessment } from '@/data/demo';
 
@@ -24,6 +25,8 @@ export const STEP_ORDER: StepId[] = [
 interface AssessmentState extends Assessment {
   addOnsReviewed: boolean;
   isDemo: boolean;
+  plannedCapabilities: string[];
+  costAvoidance: CostAvoidanceSettings;
   storageStatus: StorageStatus;
   storageError: string | null;
   step: StepId;
@@ -62,6 +65,12 @@ interface AssessmentState extends Assessment {
   clearDismissal: (categoryId: string) => void;
   togglePlannedCapability: (categoryId: string) => void;
   setPlannedCapabilities: (ids: string[]) => void;
+  /** Users planned for a capability. Undefined restores the default of every seat. */
+  setCapabilityUsers: (categoryId: string, users: number | undefined) => void;
+  /** USD per user per month. Undefined restores list price less the E7 discount. */
+  setAvoidedLicencePrice: (licenceId: string, pupm: number | undefined) => void;
+  /** Restores default users and licence prices; the capability selection is kept. */
+  resetCostAvoidance: () => void;
 
   upsertAddOn: (line: AddOnLine) => void;
   removeAddOn: (addOnId: string) => void;
@@ -291,7 +300,7 @@ export function sanitizeAssessment(a: Partial<Assessment> | null | undefined): A
     addOns: Array.isArray(a.addOns)
       ? a.addOns.filter((x) => x && typeof x.addOnId === 'string').map(sanitizeAddOnLine)
       : [],
-    // Same ghost-category rule as lines, plus de-duplication, since this is a set in spirit.
+    // Capabilities planned for deployment. Same ghost-category rule as lines, plus de-duplication.
     plannedCapabilities: Array.isArray(a.plannedCapabilities)
       ? [
           ...new Set(
@@ -299,8 +308,33 @@ export function sanitizeAssessment(a: Partial<Assessment> | null | undefined): A
           ),
         ]
       : [],
+    costAvoidance: sanitizeCostAvoidance(a.costAvoidance),
     tei: sanitizeTei(a.tei),
   };
+}
+
+export function emptyCostAvoidance(): CostAvoidanceSettings {
+  return { users: {}, unitPrices: {} };
+}
+
+/** Unknown ids and unusable numbers are dropped: they must never price a capability or licence. */
+function sanitizeCostAvoidance(raw: unknown): CostAvoidanceSettings {
+  const clean = emptyCostAvoidance();
+  if (!raw || typeof raw !== 'object') return clean;
+  const c = raw as Partial<Record<keyof CostAvoidanceSettings, unknown>>;
+  const numbers = (value: unknown, known: (id: string) => boolean, max: number, integer: boolean) => {
+    const out: Record<string, number> = {};
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return out;
+    for (const [id, n] of Object.entries(value)) {
+      if (!known(id) || typeof n !== 'number' || !Number.isFinite(n) || n < 0 || n > max) continue;
+      if (integer && !Number.isInteger(n)) continue;
+      out[id] = n;
+    }
+    return out;
+  };
+  clean.users = numbers(c.users, (id) => !!getCategory(id), MAX_SEATS, true);
+  clean.unitPrices = numbers(c.unitPrices, (id) => !!getStandaloneLicence(id), MAX_PUPM, false);
+  return clean;
 }
 
 const record = (value: unknown): value is Record<string, unknown> =>
@@ -365,6 +399,24 @@ export function assessmentInputErrors(input: unknown): string[] {
         input.plannedCapabilities.some((id) => typeof id !== 'string' || !getCategory(id)))) {
     errors.push('Planned capabilities must contain only known category identities.');
   }
+  if (input.costAvoidance !== undefined) {
+    if (!record(input.costAvoidance)) errors.push('Licence cost-avoidance settings must be an object.');
+    else {
+      const c = input.costAvoidance;
+      for (const [key, label, known, kind, max, integer] of [
+        ['users', 'Capability users', (id: string) => !!getCategory(id), 'capability', MAX_SEATS, true],
+        ['unitPrices', 'Licence unit price', (id: string) => !!getStandaloneLicence(id), 'licence', MAX_PUPM, false],
+      ] as const) {
+        const map = c[key];
+        if (map === undefined) continue;
+        if (!record(map)) { errors.push(`Cost-avoidance ${key} must be an object.`); continue; }
+        for (const [id, value] of Object.entries(map)) {
+          if (!known(id)) errors.push(`${label} uses an unknown ${kind} identity (${id}).`);
+          else number(value, `${label} for ${id}`, max, integer);
+        }
+      }
+    }
+  }
   if (input.tei !== undefined) {
     if (!record(input.tei)) errors.push('TEI settings must be an object.');
     else {
@@ -411,15 +463,21 @@ function assessmentWarnings(a: Partial<Assessment>): string[] {
   if (typeof a.currency === 'string' && a.currency !== 'USD') {
     warnings.push('Existing non-USD amounts and their original currency were preserved, not converted. Cash estimates are blocked. Download the raw inputs for recovery, then explicitly start a new USD assessment.');
   }
+  // Files written before capability cost avoidance have selections but no costAvoidance block.
+  if (Array.isArray(a.plannedCapabilities) && a.plannedCapabilities.length > 0 && a.costAvoidance === undefined) {
+    warnings.push(LEGACY_PLANNED_WARNING);
+  }
   return [...new Set(warnings)];
 }
+
+export const LEGACY_PLANNED_WARNING = 'Planned-capability selections are now valued at what licensing them separately from Microsoft would cost, instead of third-party benchmarks and adoption rates. Review the selected capabilities, users and licence prices on the results page. The figure remains outside cash savings, TCO and payback.';
 
 function stripDismissed(s: Assessment & { dismissed: string[] }): Assessment {
   const { dismissed: _dismissed, ...rest } = s;
   return rest;
 }
 
-function baseState(): Assessment & { dismissed: string[]; addOnsReviewed: boolean; isDemo: boolean } {
+function baseState(): Assessment & { dismissed: string[]; addOnsReviewed: boolean; isDemo: boolean; plannedCapabilities: string[]; costAvoidance: CostAvoidanceSettings } {
   return {
     schemaVersion: 2,
     reviewWarnings: [],
@@ -433,6 +491,7 @@ function baseState(): Assessment & { dismissed: string[]; addOnsReviewed: boolea
     lines: [],
     addOns: [],
     plannedCapabilities: [],
+    costAvoidance: emptyCostAvoidance(),
     tei: { ...DEFAULT_TEI_SETTINGS },
     dismissed: [],
   };
@@ -538,9 +597,6 @@ export const useAssessment = create<AssessmentState>()(
             lines,
             tei: { ...s.tei, combinedReviewed: false },
             dismissed: s.dismissed.filter((d) => d !== line.categoryId),
-            // Once there is real spend against a category it is a cash saving, not avoided
-            // cost. Dropping it here stops the same capability being counted on both sides.
-            plannedCapabilities: s.plannedCapabilities.filter((p) => p !== line.categoryId),
           };
         }),
 
@@ -573,6 +629,28 @@ export const useAssessment = create<AssessmentState>()(
         set(() => ({
           plannedCapabilities: [...new Set(ids.filter((id) => Boolean(getCategory(id))))],
         })),
+
+      setCapabilityUsers: (categoryId, users) =>
+        set((s) => {
+          if (!getCategory(categoryId)) return s;
+          const next = { ...s.costAvoidance.users };
+          if (users === undefined) delete next[categoryId];
+          else if (Number.isInteger(users) && users >= 0 && users <= MAX_SEATS) next[categoryId] = users;
+          else return s;
+          return { costAvoidance: { ...s.costAvoidance, users: next } };
+        }),
+
+      setAvoidedLicencePrice: (licenceId, pupm) =>
+        set((s) => {
+          if (!getStandaloneLicence(licenceId)) return s;
+          const unitPrices = { ...s.costAvoidance.unitPrices };
+          if (pupm === undefined) delete unitPrices[licenceId];
+          else if (Number.isFinite(pupm) && pupm >= 0 && pupm <= MAX_PUPM) unitPrices[licenceId] = pupm;
+          else return s;
+          return { costAvoidance: { ...s.costAvoidance, unitPrices } };
+        }),
+
+      resetCostAvoidance: () => set(() => ({ costAvoidance: emptyCostAvoidance() })),
 
       upsertAddOn: (line) =>
         set((s) => {
@@ -654,17 +732,19 @@ export const useAssessment = create<AssessmentState>()(
           storageState('Saved browser assessment could not be read. Saving is paused to preserve that data; restore a valid JSON export or reset explicitly.', 'paused');
         }
       },
-      version: 3,
-      migrate: (persisted) => {
+      version: 4,
+      migrate: (persisted, version) => {
         const previous = persisted as AssessmentState;
-        return {
-          ...previous,
-          tei: { ...previous.tei, combinedReviewed: false },
-          reviewWarnings: [
-            ...(Array.isArray(previous.reviewWarnings) ? previous.reviewWarnings : []),
-            'Model 3 uses full replacement for covered USD invoices and absorbed add-ons. Legacy retained percentages and amount confirmations no longer affect credit; this is a scenario assumption, not customer verification or licensing certification. Transition costs and delays remain applied when enabled. Combined TEI review must be renewed.',
-          ],
-        };
+        const warnings = Array.isArray(previous.reviewWarnings) ? [...previous.reviewWarnings] : [];
+        let tei = previous.tei;
+        if (version < 3) {
+          tei = { ...previous.tei, combinedReviewed: false };
+          warnings.push('Model 3 uses full replacement for covered USD invoices and absorbed add-ons. Legacy retained percentages and amount confirmations no longer affect credit; this is a scenario assumption, not customer verification or licensing certification. Transition costs and delays remain applied when enabled. Combined TEI review must be renewed.');
+        }
+        if (version < 4 && Array.isArray(previous.plannedCapabilities) && previous.plannedCapabilities.length > 0 && previous.costAvoidance === undefined) {
+          warnings.push(LEGACY_PLANNED_WARNING);
+        }
+        return { ...previous, tei, reviewWarnings: warnings };
       },
       // Spend data is sensitive, so it stays in this browser and nowhere else.
       partialize: (s) => ({
@@ -680,6 +760,7 @@ export const useAssessment = create<AssessmentState>()(
         lines: s.lines,
         addOns: s.addOns,
         plannedCapabilities: s.plannedCapabilities,
+        costAvoidance: s.costAvoidance,
         tei: s.tei,
         dismissed: s.dismissed,
         step: s.step,
@@ -733,6 +814,7 @@ export function toAssessment(s: AssessmentState): Assessment {
     lines: s.lines,
     addOns: s.addOns,
     plannedCapabilities: s.plannedCapabilities,
+    costAvoidance: s.costAvoidance,
     tei: s.tei,
   };
 }

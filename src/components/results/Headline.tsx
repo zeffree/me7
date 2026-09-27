@@ -1,6 +1,7 @@
 import type { EngineResult } from '@/model/types';
 import { formatCurrency, formatPupm } from '@/lib/format';
 import { useAssessment } from '@/store/useAssessment';
+import { getBaseline } from '@/data/skus';
 
 export function Headline({ result: r, currency }: { result: EngineResult; currency: string }) {
   const s = useAssessment();
@@ -21,6 +22,9 @@ export function Headline({ result: r, currency }: { result: EngineResult; curren
       <div><dt>{s.assumptions.horizonYears}-year cumulative impact</dt><dd>{r.tcoNetBenefit === 0 ? 'No cost difference' : `${formatCurrency(Math.abs(r.tcoNetBenefit), currency)} ${r.tcoNetBenefit < 0 ? 'more' : 'less'}`}</dd><small>Difference between current-state and move-to-E7 TCO.</small></div>
       <div><dt>Cash payback</dt><dd>{payback}</dd><small>{r.paybackStatus === 'cost-increase' ? 'This scenario remains a cost increase over the horizon.' : 'Calculated from the same monthly cash-flow schedule.'}</small></div>
     </dl>
+    {r.costAvoidance.capabilities.length > 0 && (r.costAvoidance.annualAvoided > 0
+      ? <div className="avoidance-strip"><div><strong>Capability cost avoided with E7 · separate lens</strong><p>What licensing the {r.costAvoidance.selectedCount === 1 ? 'capability' : `${r.costAvoidance.selectedCount} capabilities`} you plan to deploy separately from Microsoft would cost on top of {getBaseline(s.baseline).shortName}. E7 already includes {r.costAvoidance.selectedCount === 1 ? 'it' : 'them'}. Not an invoice you stop paying: excluded from net impact, TCO and payback. <a href="#licence-cost-avoidance">See the capabilities</a></p></div><span className="money">{formatCurrency(r.costAvoidance.annualAvoided, 'USD')}<small> USD / year</small></span></div>
+      : <div className="avoidance-strip"><div><strong>Capability cost avoided with E7 · separate lens</strong><p>E7 includes capabilities {getBaseline(s.baseline).shortName} does not. Choose the ones you plan to deploy to see what licensing them separately would cost. <a href="#licence-cost-avoidance">Choose capabilities</a></p></div></div>)}
     <details className="disclosure"><summary>Licence price versus savings-offset comparison</summary><div className="detail-copy"><p>The E7 licence amount used is <strong>{formatPupm(r.e7NetPupm, currency)} / user / month</strong>. Subtracting eligible retirement credit across {r.seats.toLocaleString()} seats produces an offset-adjusted comparison of <strong>{formatPupm(r.effectiveNetPupmConservative, currency)} / user / month</strong>.</p><p>This is not Microsoft’s invoice price. A negative offset-adjusted figure is not a refund or a negative licence bill.</p></div></details>
   </>;
 }

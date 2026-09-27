@@ -21,7 +21,7 @@ export function PresenterContent({ assessment, result }: { assessment: Assessmen
     baseline: assessment.baseline, seats: assessment.seats, netAnnual: result.recurringAnnualBenefit,
     upliftAnnual: result.uplift, redundantToday: story.baselineOpportunity,
     notCoveredAnnual: result.buckets.find(bucket => bucket.bucket === 'not-covered')?.grossSpend ?? 0,
-    capturedLines: assessment.lines.length, avoidedSelected: result.avoidedAnnualSelected,
+    capturedLines: assessment.lines.length, avoidedLicenceAnnual: result.costAvoidance.annualAvoided,
   };
   const payback = result.paybackStatus === 'reached' ? `Month ${result.paybackMonths}`
     : result.paybackStatus === 'no-investment' ? 'No initial cash deficit'

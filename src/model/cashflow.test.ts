@@ -324,12 +324,15 @@ describe('full-replacement scenario and USD cash readiness', () => {
     a.lines[0].amountSource = 'customer'; a.lines[0].assumptionConfirmed = confirmed;
     a.addOns[0].assumptionConfirmed = confirmed;
     a.assumptions.pricesConfirmed = confirmed;
+    a.plannedCapabilities = ['ztna', 'genai-assistant'];
     const r = computeAssessment(a);
     expect(r.scoredLines[0].annualCredit).toBe(0);
     expect(r.cashEstimateReady).toBe(false);
     expect(r.totalAnnualSavings).toBe(0);
     expect(r.referenceCurrency).toBe('USD');
-    expect(r.avoidedCosts.every((row) => row.currency === 'USD')).toBe(true);
+    expect(r.costAvoidance.currency).toBe('USD');
+    expect(r.costAvoidance.lines.length).toBeGreaterThan(0);
+    expect(r.costAvoidance.lines.every((row) => row.currency === 'USD')).toBe(true);
   });
 
   it('keeps unknown invoice amounts distinct from explicit zero', () => {
@@ -375,11 +378,15 @@ describe('full-replacement scenario and USD cash readiness', () => {
     expect(r.addOnAnnualRetained).toBe(7_200);
   });
 
-  it('does not offer cost avoidance for capabilities already purchased as add-ons', () => {
+  it('does not count capability cost avoidance for add-ons already purchased', () => {
     const a = fixture();
     a.addOns = [{ addOnId: 'entra-suite', mode: 'annual', annual: 12_000 }];
+    a.plannedCapabilities = ['ztna'];
     const r = computeAssessment(a);
-    expect(r.avoidedCosts.some((row) => row.category.id === 'ztna')).toBe(false);
-    expect(r.avoidedAnnualSelected).toBe(0);
+    const ztna = r.costAvoidance.capabilities.find((c) => c.category.id === 'ztna')!;
+    expect(ztna.selected).toBe(true);
+    expect(ztna.ownedVia.length).toBeGreaterThan(0);
+    expect(r.costAvoidance.lines.reduce((acc, row) => acc + row.annual, 0)).toBe(0);
+    expect(r.costAvoidance.annualAvoided).toBe(0);
   });
 });
