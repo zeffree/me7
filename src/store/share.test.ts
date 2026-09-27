@@ -1,6 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import LZString from 'lz-string';
-import { decodeAssessment, encodeAssessment } from './share';
+import {
+  buildShareUrl, clearShareParam, decodeAssessment, encodeAssessment, hasShareParam, readShareParam,
+} from './share';
 import { DEFAULT_ASSUMPTIONS, computeAssessment } from '@/model/engine';
 import { DEFAULT_TEI_SETTINGS } from '@/model/tei';
 import type { Assessment } from '@/model/types';
@@ -48,6 +50,57 @@ describe('share codec', () => {
   it('round-trips an assessment without losing anything', () => {
     const decoded = decodeAssessment(encodeAssessment(fixture));
     expect(decoded).toEqual(fixture);
+  });
+
+  describe('share URL privacy and compatibility', () => {
+    afterEach(() => vi.unstubAllGlobals());
+
+    function mockLocation(href: string) {
+      const replaceState = vi.fn();
+      vi.stubGlobal('window', { location: new URL(href), history: { replaceState } });
+      return replaceState;
+    }
+
+    it('puts new assessment data only in the fragment, not the HTTP request target', () => {
+      mockLocation('https://example.com/?view=assessment&d=old#main-content');
+      const url = new URL(buildShareUrl(fixture));
+      expect(url.search).toBe('?view=assessment');
+      expect(url.pathname + url.search).not.toContain('d=');
+      expect(decodeAssessment(new URLSearchParams(url.hash.slice(1)).get('d')!)).toEqual(fixture);
+    });
+
+    it('reads fragment links and prefers them to legacy query data', () => {
+      const old = encodeAssessment({ ...fixture, orgName: 'Old assessment' });
+      mockLocation(`https://example.com/?d=${encodeURIComponent(old)}#d=${encodeURIComponent(encodeAssessment(fixture))}`);
+      expect(hasShareParam()).toBe(true);
+      expect(readShareParam()).toEqual(fixture);
+    });
+
+    it('still reads old query-based links', () => {
+      mockLocation(`https://example.com/?d=${encodeURIComponent(encodeAssessment(fixture))}`);
+      expect(readShareParam()).toEqual(fixture);
+    });
+
+    it('distinguishes an invalid shared payload from an ordinary visit', () => {
+      mockLocation('https://example.com/#d=invalid');
+      expect(hasShareParam()).toBe(true);
+      expect(readShareParam()).toBeNull();
+      mockLocation('https://example.com/#main-content');
+      expect(hasShareParam()).toBe(false);
+      expect(readShareParam()).toBeNull();
+    });
+
+    it('clears both payload formats while preserving unrelated URL parameters', () => {
+      const replaceState = mockLocation('https://example.com/?d=old&view=assessment#d=new&section=summary');
+      clearShareParam();
+      expect(replaceState).toHaveBeenCalledWith({}, '', 'https://example.com/?view=assessment#section=summary');
+    });
+
+    it('does not rewrite ordinary anchors', () => {
+      const replaceState = mockLocation('https://example.com/#main-content');
+      clearShareParam();
+      expect(replaceState).not.toHaveBeenCalled();
+    });
   });
 
   it('produces an identical engine result after a round-trip', () => {

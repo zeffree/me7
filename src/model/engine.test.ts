@@ -6,10 +6,8 @@ import type { BaselineSkuId } from '@/data/skus';
 import { CATEGORIES } from '@/data/categories';
 
 /**
- * Several tests need a category the catalog scores at full confidence, so the credit factor is
- * 1.0 in both scenarios and the arithmetic is easy to read. Resolve it from the catalog rather
- * than naming a product: confidence ratings are research-driven and do change, and a test suite
- * that fails because a vendor claim was corrected is testing the wrong thing.
+ * Resolve a covered category from the catalog rather than coupling arithmetic fixtures to a
+ * particular product. Confidence labels are descriptive and never scale replacement credit.
  */
 const FULL_CONFIDENCE_CATEGORY = CATEGORIES.find((c) => c.confidence === 'full')?.id;
 if (!FULL_CONFIDENCE_CATEGORY) {
@@ -20,7 +18,7 @@ function makeAssessment(
   baseline: BaselineSkuId,
   overrides: Partial<Assessment> = {},
 ): Assessment {
-  return {
+  const assessment: Assessment = {
     orgName: 'Test Corp',
     seats: 1000,
     currency: 'USD',
@@ -34,6 +32,11 @@ function makeAssessment(
     plannedCapabilities: [],
     tei: { ...DEFAULT_TEI_SETTINGS },
     ...overrides,
+  };
+  return {
+    ...assessment,
+    lines: assessment.lines.map((l) => ({ amountSource: 'customer', ...l })),
+    addOns: assessment.addOns.map((l) => ({ amountSource: 'customer', ...l })),
   };
 }
 
@@ -76,11 +79,11 @@ describe('baseline-aware bucketing', () => {
     expect(r.scoredLines[0].bucket).toBe('already-redundant');
   });
 
-  it('classifies EDR as unlocked by E7 for an M365 E3 customer', () => {
+  it('classifies EDR P2 as an upgrade from M365 E3 endpoint P1', () => {
     const r = computeAssessment(
       makeAssessment('m365e3', { lines: [line({ categoryId: 'edr-xdr' })] }),
     );
-    expect(r.scoredLines[0].bucket).toBe('unlocked-by-e7');
+    expect(r.scoredLines[0].bucket).toBe('partial-upgrade');
   });
 
   it('treats ZTNA as unlocked even for E5, because the Entra Suite is an E5 add-on', () => {
@@ -102,7 +105,7 @@ describe('replacement credit', () => {
   /**
    * Credit used to be scaled by a confidence factor per tier (strong 70%, partial 35%). Those
    * were percentage guesses layered on top of the customer's own figures, so they are gone: the
-   * only thing that now reduces a line is the retained share the customer states.
+   * full replacement is now a scenario assumption, including for legacy retained percentages.
    */
   it('credits a strong-overlap category in full, with no confidence haircut', () => {
     const r = computeAssessment(
@@ -113,13 +116,13 @@ describe('replacement credit', () => {
     expect(r.thirdPartyCreditBest).toBeCloseTo(120_000, 6);
   });
 
-  it('reduces credit only by the retained share the customer entered', () => {
+  it('ignores a legacy retained share and credits the entire covered invoice', () => {
     const r = computeAssessment(
       makeAssessment('m365e3', {
         lines: [line({ categoryId: 'edr-xdr', pupm: 10, retainPct: 25 })],
       }),
     );
-    expect(r.thirdPartyCreditConservative).toBeCloseTo(90_000, 6);
+    expect(r.thirdPartyCreditConservative).toBeCloseTo(120_000, 6);
   });
 
   it('gives a full-confidence category 100% credit in both cases', () => {
@@ -132,8 +135,7 @@ describe('replacement credit', () => {
 
   it('still labels an upgrade-coverage category as partial, but no longer docks it', () => {
     // archiving-retention is a 'strong' category but only an 'upgrade' for O365 E3. The label is
-    // kept because it tells the user where a retained share is worth setting; it no longer
-    // silently multiplies the money.
+    // kept for evidence context, not to silently multiply the scenario's money.
     const r = computeAssessment(
       makeAssessment('o365e3', { lines: [line({ categoryId: 'archiving-retention', pupm: 10 })] }),
     );
@@ -159,31 +161,34 @@ describe('replacement credit', () => {
     expect(notCovered?.lineCount).toBe(2);
   });
 
-  it('honours retained spend', () => {
+  it('keeps retained percentages on input without applying them to either credit alias', () => {
     const r = computeAssessment(
       makeAssessment('m365e3', {
         lines: [line({ categoryId: FULL_CONFIDENCE_CATEGORY, pupm: 10, retainPct: 25 })],
       }),
     );
-    // full confidence, so credit is purely the non-retained share
-    expect(r.thirdPartyCreditConservative).toBeCloseTo(90_000, 6);
+    expect(r.thirdPartyCreditConservative).toBeCloseTo(120_000, 6);
+    expect(r.thirdPartyCreditBest).toBeCloseTo(120_000, 6);
+    expect(r.scoredLines[0].line.retainPct).toBe(25);
   });
 
-  it('clamps a nonsensical retain percentage', () => {
+  it('does not allow a nonsensical deprecated percentage to affect replacement', () => {
     const r = computeAssessment(
       makeAssessment('m365e3', {
         lines: [line({ categoryId: FULL_CONFIDENCE_CATEGORY, pupm: 10, retainPct: 400 })],
       }),
     );
-    expect(r.thirdPartyCreditConservative).toBe(0);
+    expect(r.thirdPartyCreditConservative).toBe(120_000);
   });
 
-  it('ignores lines pointing at an unknown category', () => {
+  it('retains unknown invoices at full cost without claiming savings', () => {
     const r = computeAssessment(
       makeAssessment('m365e3', { lines: [line({ categoryId: 'does-not-exist' })] }),
     );
     expect(r.scoredLines).toHaveLength(0);
-    expect(r.thirdPartyAnnual).toBe(0);
+    expect(r.thirdPartyAnnual).toBe(120_000);
+    expect(r.totalAnnualSavings).toBe(0);
+    expect(r.warnings.join(' ')).toContain('Unknown catalog');
   });
 });
 
@@ -253,12 +258,13 @@ describe('core cost identity', () => {
 });
 
 describe('three-year TCO', () => {
-  it('throttles year-one savings and applies migration cost once', () => {
+  it('schedules six months of year-one savings and applies transition cost once', () => {
     const a = makeAssessment('m365e3', {
       lines: [line({ categoryId: FULL_CONFIDENCE_CATEGORY, pupm: 20 })],
     });
-    a.assumptions.migrationCostPerSeat = 10;
-    a.assumptions.year1RealizationPct = 50;
+    a.assumptions.transitionEnabled = true;
+    a.assumptions.transitionCost = 10_000;
+    a.lines[0].savingsDelayMonths = 6;
 
     const r = computeAssessment(a);
     expect(r.migrationTotal).toBe(10_000);
@@ -293,7 +299,8 @@ describe('three-year TCO', () => {
       lines: [line({ categoryId: FULL_CONFIDENCE_CATEGORY, pupm: 40 })],
       addOns: [{ addOnId: 'copilot', mode: 'pupm', pupm: 30 }],
     });
-    a.assumptions.migrationCostPerSeat = 5;
+    a.assumptions.transitionEnabled = true;
+    a.assumptions.transitionCost = 5_000;
     const r = computeAssessment(a);
     expect(r.netAnnualConservative).toBeGreaterThan(0);
     expect(r.paybackMonths).toBeGreaterThan(0);
@@ -407,7 +414,7 @@ describe('edge cases', () => {
     expect(r.migrationTotal).toBe(0);
   });
 
-  it('applies retain percentages only inside the 0 to 100 range', () => {
+  it('ignores retain percentages both inside and outside the former 0 to 100 range', () => {
     const atZero = computeAssessment(
       makeAssessment('m365e3', { lines: [line({ categoryId: FULL_CONFIDENCE_CATEGORY, retainPct: 0 })] }),
     );
@@ -423,8 +430,8 @@ describe('edge cases', () => {
 
     expect(atZero.thirdPartyCreditConservative).toBe(120_000);
     expect(belowZero.thirdPartyCreditConservative).toBe(120_000);
-    expect(atHundred.thirdPartyCreditConservative).toBe(0);
-    expect(aboveHundred.thirdPartyCreditConservative).toBe(0);
+    expect(atHundred.thirdPartyCreditConservative).toBe(120_000);
+    expect(aboveHundred.thirdPartyCreditConservative).toBe(120_000);
   });
 
   it('clamps E7 discounts at zero and one hundred percent', () => {
@@ -445,7 +452,7 @@ describe('edge cases', () => {
     expect(computeAssessment(negativeDiscount).e7NetPupm).toBe(99);
   });
 
-  it('clamps custom confidence factors to the zero-to-one credit range', () => {
+  it('ignores obsolete confidence factors in both aliases', () => {
     const a = makeAssessment('m365e3', {
       lines: [line({ categoryId: FULL_CONFIDENCE_CATEGORY, mode: 'annual', annual: 100_000 })],
     });
@@ -455,10 +462,10 @@ describe('edge cases', () => {
     const r = computeAssessment(a);
 
     expect(r.thirdPartyCreditConservative).toBe(100_000);
-    expect(r.thirdPartyCreditBest).toBe(0);
+    expect(r.thirdPartyCreditBest).toBe(100_000);
   });
 
-  it('skips unknown add-ons without dropping known add-ons', () => {
+  it('retains unknown add-ons at full cost without dropping known add-ons', () => {
     const r = computeAssessment(
       makeAssessment('m365e5', {
         addOns: [
@@ -468,12 +475,15 @@ describe('edge cases', () => {
       }),
     );
 
-    expect(r.scoredAddOns).toHaveLength(1);
-    expect(r.scoredAddOns[0].addOnId).toBe('copilot');
+    expect(r.scoredAddOns).toHaveLength(2);
+    expect(r.scoredAddOns[0].annualCredit).toBe(0);
+    expect(r.scoredAddOns[1].addOnId).toBe('copilot');
     expect(r.addOnAnnualAbsorbed).toBe(12_000);
+    expect(r.addOnAnnualTotal).toBe(1_011_999);
+    expect(r.addOnAnnualRetained).toBe(999_999);
   });
 
-  it('adds duplicate category lines independently', () => {
+  it('preserves duplicate invoice costs but excludes all ambiguous retirement', () => {
     const r = computeAssessment(
       makeAssessment('m365e3', {
         lines: [
@@ -485,7 +495,9 @@ describe('edge cases', () => {
 
     expect(r.scoredLines).toHaveLength(2);
     expect(r.thirdPartyAnnual).toBe(35_000);
-    expect(r.thirdPartyCreditConservative).toBe(35_000);
+    expect(r.thirdPartyCreditConservative).toBe(0);
+    expect(r.cashEstimateReady).toBe(false);
+    expect(r.scoredLines.every((line) => line.exclusionReason?.includes('Remove the duplicate'))).toBe(true);
   });
 
   it('normalises unusual TCO horizons to a safe whole-year range', () => {
@@ -502,7 +514,7 @@ describe('edge cases', () => {
     expect(computeAssessment(huge).tco).toHaveLength(50);
   });
 
-  it('keeps very large realistic inputs finite', () => {
+  it('bounds oversized inputs to the supported five-million-seat limit and remains finite', () => {
     const r = computeAssessment(
       makeAssessment('m365e5', {
         seats: 10_000_000,
@@ -511,12 +523,13 @@ describe('edge cases', () => {
       }),
     );
 
-    expect(r.currentAnnualTotal).toBeCloseTo(2_007_200_000_000, 0);
+    expect(r.seats).toBe(5_000_000);
+    expect(r.currentAnnualTotal).toBeCloseTo(2_003_600_000_000, 0);
     expect(r.totalSavingsConservative).toBe(1e12);
     expect(Number.isFinite(r.tcoNetBenefit)).toBe(true);
   });
 
-  it('supports fractional seats consistently', () => {
+  it('normalizes fractional seats consistently across every recurring total', () => {
     const r = computeAssessment(
       makeAssessment('m365e5', {
         seats: 12.5,
@@ -524,9 +537,10 @@ describe('edge cases', () => {
       }),
     );
 
-    expect(r.baselineAnnual).toBe(9_000);
-    expect(r.thirdPartyAnnual).toBe(1_500);
-    expect(r.e7Annual).toBe(14_850);
+    expect(r.seats).toBe(13);
+    expect(r.baselineAnnual).toBe(9_360);
+    expect(r.thirdPartyAnnual).toBe(1_560);
+    expect(r.e7Annual).toBe(15_444);
   });
 
   it('keeps malformed numeric fields from contaminating totals with NaN or Infinity', () => {
@@ -555,13 +569,11 @@ describe('edge cases', () => {
     expect(Number.isFinite(r.netAnnualConservative)).toBe(true);
   });
 
-  it('lets absent, malformed, and past contract dates remain informational only', () => {
+  it.each([undefined, 'not-a-date', '2001-01-01'])('keeps contract date %s informational only', (contractEnd) => {
     const r = computeAssessment(
       makeAssessment('m365e3', {
         lines: [
-          line({ categoryId: FULL_CONFIDENCE_CATEGORY, mode: 'annual', annual: 10_000 }),
-          line({ categoryId: FULL_CONFIDENCE_CATEGORY, mode: 'annual', annual: 20_000, contractEnd: 'not-a-date' }),
-          line({ categoryId: FULL_CONFIDENCE_CATEGORY, mode: 'annual', annual: 30_000, contractEnd: '2001-01-01' }),
+          line({ categoryId: FULL_CONFIDENCE_CATEGORY, mode: 'annual', annual: 60_000, contractEnd }),
         ],
       }),
     );

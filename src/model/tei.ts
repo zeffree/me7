@@ -31,6 +31,7 @@ import {
   type TeiStudy,
 } from '@/data/teiStudies';
 import { getBaseline } from '@/data/skus';
+import { annualiseLine, scheduledPayback } from './engine';
 import type {
   Assessment,
   EngineResult,
@@ -51,6 +52,8 @@ import type {
  */
 export const DEFAULT_TEI_SETTINGS: TeiSettings = {
   enabled: false,
+  combinedReviewed: false,
+  enablementOverlapReviewed: false,
   lineOverrides: {},
   copilotAdoptionPct: 60,
   confidencePct: 75,
@@ -83,6 +86,10 @@ export function isLineIncluded(line: TeiBenefitLine, settings: TeiSettings): boo
 }
 
 function notApplicableReason(study: TeiStudy, assessment: Assessment): string | undefined {
+  if (assessment.addOns.some((line) => (line.addOnId === 'copilot-m365' ? 'copilot' : line.addOnId) === study.id &&
+      annualiseLine(line, assessment.seats) > 0)) {
+    return 'This capability is already bought as a Microsoft add-on; its full study benefit is not a new E7 benefit.';
+  }
   if (study.appliesTo.includes(assessment.baseline)) return undefined;
   const name = getBaseline(assessment.baseline).name;
   return `You are already on ${name}, so this value is banked rather than gained. Counting it towards an E7 move would be selling you something you own.`;
@@ -133,29 +140,6 @@ function scoreLine(
   };
 }
 
-/**
- * Payback in months, walking the undiscounted cash flow.
- *
- * Migration is charged at time zero the way a TEI charges its initial investment, so a move with
- * no migration cost and immediate benefit pays back in month one rather than month zero.
- */
-function computePayback(
-  migrationTotal: number,
-  years: { benefit: number; recurringCost: number }[],
-): number | null {
-  let cumulative = -migrationTotal;
-  for (let y = 0; y < years.length; y++) {
-    const monthlyNet = (years[y].benefit - years[y].recurringCost) / 12;
-    for (let m = 1; m <= 12; m++) {
-      cumulative += monthlyNet;
-      // With an up-front investment, breaking even is payback. Without one, breaking even is
-      // just as likely to mean nothing has happened at all, so require a real surplus.
-      if (cumulative >= 0 && (migrationTotal > 0 || cumulative > 0)) return y * 12 + m;
-    }
-  }
-  return null;
-}
-
 export function computeTei(assessment: Assessment, result: EngineResult): TeiResult {
   const settings: TeiSettings = { ...DEFAULT_TEI_SETTINGS, ...(assessment.tei ?? {}) };
   const seats = nonNegative(result.seats);
@@ -168,7 +152,7 @@ export function computeTei(assessment: Assessment, result: EngineResult): TeiRes
 
   for (const study of TEI_STUDIES) {
     const reason = notApplicableReason(study, assessment);
-    const applies = reason === undefined;
+    const applies = settings.enabled === true && reason === undefined;
     const lines = study.lines.map((line) =>
       scoreLine(study, line, {
         seats,
@@ -180,13 +164,49 @@ export function computeTei(assessment: Assessment, result: EngineResult): TeiRes
       }),
     );
     scoredLines.push(...lines);
+    const byYear = Array.from({ length: horizonYears }, (_, y) =>
+      lines.reduce((total, line) => total + line.byYear[y], 0));
     studies.push({
       studyId: study.id,
       applies,
       notApplicableReason: reason,
       presentValue: lines.reduce((a, l) => a + l.presentValue, 0),
       includedLineCount: lines.filter((l) => l.included).length,
+      byYear,
+      total: byYear.reduce((total, value) => total + value, 0),
     });
+  }
+
+  const combinationWarnings: string[] = [];
+  if (!settings.enabled) combinationWarnings.push('Experimental study estimates are switched off.');
+  if (!settings.combinedReviewed) combinationWarnings.push('Explicit benefit-overlap and implementation-cost review is required before combining studies with cash costs.');
+  if (assessment.currency !== 'USD') combinationWarnings.push('Study values are USD. No currency conversion is supplied, so they cannot be combined with non-USD assessment costs.');
+  if (!result.cashEstimateReady) combinationWarnings.push('Resolve incomplete or ambiguous USD cash-model inputs before combining.');
+  if (!settings.includeEnablementCost && !settings.enablementOverlapReviewed && copilotSeats > 0 &&
+      studies.some((study) => study.studyId === 'copilot' && study.applies)) {
+    combinationWarnings.push('Review the exact excluded Copilot training cost. A transition budget alone does not prove this cost is already included or inapplicable.');
+  }
+  const active = scoredLines.filter((line) => line.included && line.total > 0);
+  const groups = new Map<string, string[]>();
+  for (const scored of active) {
+    if (scored.line.doubleCounts) combinationWarnings.push(`Exclude ${scored.line.name}: overlaps the common cash benefit.`);
+    const group = (scored.line as TeiBenefitLine & { overlapGroup?: string }).overlapGroup;
+    if (group) groups.set(group, [...(groups.get(group) ?? []), scored.line.name]);
+  }
+  for (const [group, lines] of groups) {
+    if (lines.length > 1) combinationWarnings.push(`Resolve overlapping benefit group "${group}" by keeping at most one line: ${lines.join(', ')}.`);
+  }
+  const canCombine = combinationWarnings.length === 0;
+  const standaloneBenefitPv = scoredLines.reduce((total, line) => total + line.presentValue, 0);
+  if (!canCombine) {
+    return {
+      enabled: settings.enabled === true, canCombine, combinationWarnings,
+      referenceCurrency: 'USD', seats, copilotSeats, horizonYears, scoredLines, studies,
+      years: [], teiBenefitPv: standaloneBenefitPv, cashBenefitPv: 0,
+      totalBenefitPv: 0, costPv: 0, npv: null, roiPct: null, paybackMonths: null,
+      paybackStatus: 'withheld',
+      upliftAnnual: 0, migrationTotal: 0, enablementTotal: 0,
+    };
   }
 
   // ---------------------------------------------------------------- costs
@@ -194,12 +214,11 @@ export function computeTei(assessment: Assessment, result: EngineResult): TeiRes
   // baseline the uplift is negative, which is a benefit rather than a negative cost — folding it
   // in as one would produce a nonsensical ROI denominator.
   const upliftAnnual = Math.max(0, result.uplift);
-  const upliftCredit = Math.max(0, -result.uplift);
   const migrationTotal = nonNegative(result.migrationTotal);
 
   const enablementByYear: number[] = [];
   for (let y = 0; y < horizonYears; y++) {
-    if (!settings.includeEnablementCost) {
+    if (!settings.includeEnablementCost || !studies.find((study) => study.studyId === 'copilot')?.applies) {
       enablementByYear.push(0);
       continue;
     }
@@ -209,10 +228,7 @@ export function computeTei(assessment: Assessment, result: EngineResult): TeiRes
   const enablementTotal = enablementByYear.reduce((a, b) => a + b, 0);
 
   // ---------------------------------------------------------------- benefits
-  const cashBenefitAnnual = nonNegative(result.totalSavingsConservative) + upliftCredit;
-
   const years: TeiYear[] = [];
-  const paybackInput: { benefit: number; recurringCost: number }[] = [];
   let teiBenefitPv = 0;
   let cashBenefitPv = 0;
   let recurringCostPv = 0;
@@ -223,6 +239,9 @@ export function computeTei(assessment: Assessment, result: EngineResult): TeiRes
   let cumulativeNet = -migrationTotal;
 
   for (let y = 0; y < horizonYears; y++) {
+    const cashBenefitAnnual = result.monthlyCashflow
+      .filter((month) => month.month > y * 12 && month.month <= (y + 1) * 12)
+      .reduce((total, month) => total + month.cashSavings + Math.max(0, -month.licenceUplift), 0);
     const teiBenefit = scoredLines.reduce((a, l) => a + l.byYear[y], 0);
     const cost = upliftAnnual + enablementByYear[y];
     const benefit = teiBenefit + cashBenefitAnnual;
@@ -232,8 +251,6 @@ export function computeTei(assessment: Assessment, result: EngineResult): TeiRes
     teiBenefitPv += discountYear(teiBenefit, y + 1);
     cashBenefitPv += discountYear(cashBenefitAnnual, y + 1);
     recurringCostPv += discountYear(cost, y + 1);
-
-    paybackInput.push({ benefit, recurringCost: cost });
 
     years.push({
       year: y + 1,
@@ -249,9 +266,21 @@ export function computeTei(assessment: Assessment, result: EngineResult): TeiRes
   const costPv = recurringCostPv + migrationTotal;
   const totalBenefitPv = teiBenefitPv + cashBenefitPv;
   const npv = totalBenefitPv - costPv;
+  let monthlyCumulative = -migrationTotal;
+  const paybackSchedule = result.monthlyCashflow.map((month) => {
+    if (month.month === 0) return month;
+    const year = Math.floor((month.month - 1) / 12);
+    const studyBenefit = scoredLines.reduce((total, line) => total + line.byYear[year], 0) / 12;
+    const netBenefit = month.netBenefit + studyBenefit - enablementByYear[year] / 12;
+    monthlyCumulative += netBenefit;
+    return { month: month.month, netBenefit, cumulativeNetBenefit: monthlyCumulative };
+  });
 
   return {
     enabled: settings.enabled === true,
+    canCombine,
+    combinationWarnings,
+    referenceCurrency: 'USD',
     seats,
     copilotSeats,
     horizonYears,
@@ -264,7 +293,7 @@ export function computeTei(assessment: Assessment, result: EngineResult): TeiRes
     costPv,
     npv,
     roiPct: costPv > 0 ? (npv / costPv) * 100 : null,
-    paybackMonths: computePayback(migrationTotal, paybackInput),
+    ...scheduledPayback(paybackSchedule),
     upliftAnnual,
     migrationTotal,
     enablementTotal,

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { sanitizeAssessment } from '@/store/useAssessment';
 import { getBaseline } from '@/data/skus';
 import { DEFAULT_TEI_SETTINGS } from '@/model/tei';
+import { computeAssessment } from '@/model/engine';
 import type { Assessment } from '@/model/types';
 
 /**
@@ -30,24 +31,28 @@ describe('sanitizeAssessment', () => {
     expect(clean.assumptions.baselineUnitPupm).toBe(47);
   });
 
-  it('drops spend lines whose category no longer exists but keeps the rest', () => {
+  it('preserves unknown invoice amounts with an actionable review warning', () => {
     const clean = sanitizeAssessment({
       lines: [
         { categoryId: 'edr-xdr', mode: 'pupm', pupm: 8, retainPct: 0 },
         { categoryId: 'category-we-deleted', mode: 'pupm', pupm: 99, retainPct: 0 },
       ],
     } as unknown as Assessment);
-    expect(clean.lines.map((l) => l.categoryId)).toEqual(['edr-xdr']);
+    expect(clean.lines.map((l) => l.categoryId)).toEqual(['edr-xdr', 'category-we-deleted']);
+    expect(clean.lines[1].pupm).toBe(99);
+    expect(clean.reviewWarnings?.join(' ')).toContain('unknown catalog identity');
   });
 
-  it('drops add-on lines whose SKU no longer exists', () => {
+  it('preserves unknown add-on amounts for customer review', () => {
     const clean = sanitizeAssessment({
       addOns: [
         { addOnId: 'copilot', mode: 'pupm', pupm: 30 },
         { addOnId: 'sku-that-was-retired', mode: 'pupm', pupm: 5 },
       ],
     } as unknown as Assessment);
-    expect(clean.addOns.map((a) => a.addOnId)).toEqual(['copilot']);
+    expect(clean.addOns.map((a) => a.addOnId)).toEqual(['copilot', 'sku-that-was-retired']);
+    expect(clean.addOns[1].pupm).toBe(5);
+    expect(clean.reviewWarnings?.join(' ')).toContain('unknown catalog identity');
   });
 
   it('rejects non-finite and negative seat counts', () => {
@@ -86,6 +91,37 @@ describe('sanitizeAssessment', () => {
     expect(clean.assumptions.e7DiscountPct).toBe(12);
     expect(clean.lines).toHaveLength(1);
     expect(clean.addOns).toHaveLength(1);
+  });
+
+  it('preserves currency and audit-only legacy flags without applying them to USD credit', () => {
+    const clean = sanitizeAssessment({
+      currency: 'USD',
+      lines: [{
+        categoryId: 'edr-xdr', vendor: 'Legacy invoice', mode: 'annual', annual: 12_000,
+        retainPct: 100, assumptionConfirmed: false,
+      }],
+      addOns: [{ addOnId: 'copilot', mode: 'annual', annual: 7_200, retainPct: 100, assumptionConfirmed: false }],
+    });
+    expect(clean.lines[0].retainPct).toBe(100);
+    expect(clean.lines[0].assumptionConfirmed).toBe(false);
+    expect(clean.addOns[0].assumptionConfirmed).toBe(false);
+    expect(clean.assumptions.pricesConfirmed).toBe(false);
+    expect(clean.reviewWarnings?.join(' ')).toContain('full replacement');
+    const result = computeAssessment(clean);
+    expect(result.totalAnnualSavings).toBe(19_200);
+    expect(result.cashEstimateReady).toBe(true);
+  });
+
+  it.each([undefined, null, NaN, Infinity, '12000'])('does not convert an unknown or invalid legacy amount %s into an explicit zero', (annual) => {
+    const clean = sanitizeAssessment({
+      lines: [{ categoryId: 'edr-xdr', vendor: 'Legacy', mode: 'annual', annual, retainPct: 0 }],
+      addOns: [{ addOnId: 'copilot', mode: 'annual', annual }],
+    } as unknown as Assessment);
+    expect(clean.lines[0].annual).toBeUndefined();
+    expect(clean.addOns[0].annual).toBeUndefined();
+    const result = computeAssessment(clean);
+    expect(result.totalAnnualSavings).toBe(0);
+    expect(result.cashEstimateReady).toBe(false);
   });
 });
 
@@ -162,6 +198,8 @@ describe('sanitizeAssessment — TEI settings', () => {
     });
     expect(clean).toEqual({
       enabled: true,
+      combinedReviewed: false,
+      enablementOverlapReviewed: false,
       confidencePct: 80,
       copilotAdoptionPct: 45,
       includeEnablementCost: false,
@@ -308,4 +346,3 @@ describe('sanitizeAssessment — numeric bounds', () => {
     expect(clean.addOns[0].pupm).toBe(30);
   });
 });
-

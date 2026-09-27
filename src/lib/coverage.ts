@@ -8,18 +8,18 @@ export const COVERAGE_META: Record<
     label: 'Already in your suite',
     tone: 'warning',
     blurb:
-      'Your current subscription already includes this capability. If you also pay a vendor for it, you are paying twice today — before E7 even enters the picture.',
+      'Your current subscription includes an overlapping capability. Confirm your requirements and cancellable spend; an overlapping licence is not proof that a second vendor is unnecessary.',
   },
   unlocked: {
     label: 'Unlocked by E7',
     tone: 'brand',
-    blurb: 'Your current suite does not cover this. Moving to E7 newly includes it.',
+    blurb: 'E7 adds an entitlement beyond your current suite. Confirm eligibility, technical suitability and any extra charges before retiring a vendor.',
   },
   upgrade: {
     label: 'Tier upgrade',
     tone: 'neutral',
     blurb:
-      'You have a lesser version of this today and E7 raises the tier. Scored conservatively, because a tier upgrade is rarely a like-for-like replacement.',
+      'E7 raises the available tier. This does not establish like-for-like replacement; confirm what you would keep. No confidence multiplier is applied.',
   },
   'not-covered': {
     label: 'Not covered by E7',
@@ -38,29 +38,29 @@ export const CONFIDENCE_META: Record<
  * guidance for choosing a retained share — they no longer multiply the money themselves.
  */
   full: {
-    label: 'Full replacement',
+    label: 'Broad overlap',
     tone: 'positive',
-    blurb: 'A direct like-for-like substitute. Most teams retain nothing here.',
+    blurb: 'Broad capability overlap, not a guarantee of parity. Confirm requirements, coverage and retained spend.',
   },
   strong: {
     label: 'Strong overlap',
     tone: 'brand',
     blurb:
-      'Covers the large majority of real-world use. Expect to keep a slice for edge cases — set a retained share to reflect it.',
+      'Potential overlap across common uses. Compare your actual requirements and set the retained share yourself.',
   },
   partial: {
     label: 'Partial overlap',
     tone: 'muted',
     blurb:
-      'Meaningful overlap but not a clean swap. Keep a substantial retained share unless you have tested the gap.',
+      'Some capabilities overlap, but the complete vendor service may not. Confirm the specific spend that could stop.',
   },
 };
 
 export const BUCKET_META = {
   'already-redundant': {
-    label: 'Already redundant today',
+    label: 'Existing-suite overlap',
     tone: 'warning' as const,
-    blurb: 'Capabilities your current suite already includes but you still buy separately.',
+    blurb: 'Potential consolidation using capabilities in your current suite; not a benefit that requires E7.',
   },
   'unlocked-by-e7': {
     label: 'Unlocked by E7',

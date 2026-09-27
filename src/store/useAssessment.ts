@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { createJSONStorage, persist } from 'zustand/middleware';
 import { DEFAULT_ASSUMPTIONS } from '@/model/engine';
 import { DEFAULT_TEI_SETTINGS } from '@/model/tei';
 import type { AddOnLine, Assessment, Assumptions, SpendLine, TeiSettings } from '@/model/types';
@@ -7,8 +7,10 @@ import { BASELINE_SKUS, getBaseline, type BaselineSkuId } from '@/data/skus';
 import { getCategory } from '@/data/categories';
 import { getAddOn } from '@/data/msAddOns';
 import { getTeiLine } from '@/data/teiStudies';
+import { createDemoAssessment } from '@/data/demo';
 
 export type StepId = 'profile' | 'quick' | 'catalog' | 'addons' | 'assumptions' | 'results';
+export type StorageStatus = 'available' | 'unavailable' | 'paused';
 
 export const STEP_ORDER: StepId[] = [
   'profile',
@@ -20,6 +22,10 @@ export const STEP_ORDER: StepId[] = [
 ];
 
 interface AssessmentState extends Assessment {
+  addOnsReviewed: boolean;
+  isDemo: boolean;
+  storageStatus: StorageStatus;
+  storageError: string | null;
   step: StepId;
   started: boolean;
   sellerMode: boolean;
@@ -43,6 +49,12 @@ interface AssessmentState extends Assessment {
   setCurrency: (v: string) => void;
   setBaseline: (v: BaselineSkuId) => void;
   setAssumptions: (patch: Partial<Assumptions>) => void;
+  setReviewWarnings: (warnings: string[]) => void;
+  setAddOnsReviewed: (reviewed: boolean) => void;
+  confirmLineAssumption: (categoryId: string, confirmed: boolean) => void;
+  confirmAddOnAssumption: (addOnId: string, confirmed: boolean) => void;
+  setTeiCombinedReviewed: (reviewed: boolean) => void;
+  setTeiEnablementOverlapReviewed: (reviewed: boolean) => void;
 
   upsertLine: (line: SpendLine) => void;
   removeLine: (categoryId: string) => void;
@@ -94,6 +106,41 @@ function isBaselineId(v: unknown): v is BaselineSkuId {
 const MAX_SEATS = 5_000_000;
 const MAX_PUPM = 100_000;
 const MAX_ANNUAL = 1e12;
+let lastStorageError: string | null = null;
+let lastStorageStatus: StorageStatus = 'available';
+let storageWriteBlocked = false;
+let reportStorageError = (_message: string | null, _status: StorageStatus) => {};
+
+function storageState(message: string | null, status: StorageStatus): void {
+  if (lastStorageError === message && lastStorageStatus === status) return;
+  lastStorageError = message;
+  lastStorageStatus = status;
+  reportStorageError(message, status);
+}
+
+function storageFailure(): void {
+  const message = 'Browser storage is unavailable or full. Changes remain in this tab only; export JSON to keep a copy.';
+  storageState(message, storageWriteBlocked ? 'paused' : 'unavailable');
+}
+
+const assessmentStorage = createJSONStorage(() => ({
+  getItem: (name: string) => {
+    try { return globalThis.localStorage.getItem(name); }
+    catch { storageWriteBlocked = true; storageFailure(); return null; }
+  },
+  setItem: (name: string, value: string) => {
+    if (storageWriteBlocked) return;
+    try {
+      globalThis.localStorage.setItem(name, value);
+      storageState(null, 'available');
+    }
+    catch { storageFailure(); }
+  },
+  removeItem: (name: string) => {
+    try { globalThis.localStorage.removeItem(name); }
+    catch { storageFailure(); }
+  },
+}));
 
 /** Clamp an untrusted number into a usable range, falling back when it is not a number at all. */
 function bounded(v: unknown, max: number, fallback: number): number {
@@ -110,19 +157,30 @@ function clampPct(v: number): number {
 function sanitizeSpendLine(l: SpendLine): SpendLine {
   return {
     ...l,
+    vendor: typeof l.vendor === 'string' ? l.vendor : '',
+    mode: l.mode === 'annual' || l.mode === 'pupm' ? l.mode : l.annual !== undefined ? 'annual' : 'pupm',
     seats: l.seats === undefined ? undefined : Math.round(bounded(l.seats, MAX_SEATS, 0)),
-    pupm: l.pupm === undefined ? undefined : bounded(l.pupm, MAX_PUPM, 0),
-    annual: l.annual === undefined ? undefined : bounded(l.annual, MAX_ANNUAL, 0),
+    pupm: typeof l.pupm === 'number' && Number.isFinite(l.pupm) ? bounded(l.pupm, MAX_PUPM, 0) : undefined,
+    annual: typeof l.annual === 'number' && Number.isFinite(l.annual) ? bounded(l.annual, MAX_ANNUAL, 0) : undefined,
     retainPct: Math.min(100, Math.max(0, bounded(l.retainPct, 100, 0))),
+    savingsDelayMonths: Math.round(bounded(l.savingsDelayMonths, 1200, 0)),
+    amountSource: l.amountSource === 'customer' || l.amountSource === 'benchmark' ? l.amountSource : 'legacy',
+    assumptionConfirmed: l.assumptionConfirmed === true,
   };
 }
 
 function sanitizeAddOnLine(l: AddOnLine): AddOnLine {
   return {
     ...l,
+    addOnId: l.addOnId === 'copilot-m365' ? 'copilot' : l.addOnId,
+    mode: l.mode === 'annual' || l.mode === 'pupm' ? l.mode : l.annual !== undefined ? 'annual' : 'pupm',
     seats: l.seats === undefined ? undefined : Math.round(bounded(l.seats, MAX_SEATS, 0)),
-    pupm: l.pupm === undefined ? undefined : bounded(l.pupm, MAX_PUPM, 0),
-    annual: l.annual === undefined ? undefined : bounded(l.annual, MAX_ANNUAL, 0),
+    pupm: typeof l.pupm === 'number' && Number.isFinite(l.pupm) ? bounded(l.pupm, MAX_PUPM, 0) : undefined,
+    annual: typeof l.annual === 'number' && Number.isFinite(l.annual) ? bounded(l.annual, MAX_ANNUAL, 0) : undefined,
+    retainPct: bounded(l.retainPct, 100, 0),
+    savingsDelayMonths: Math.round(bounded(l.savingsDelayMonths, 1200, 0)),
+    amountSource: l.amountSource === 'customer' || l.amountSource === 'benchmark' ? l.amountSource : 'legacy',
+    assumptionConfirmed: l.assumptionConfirmed === true,
   };
 }
 
@@ -145,6 +203,8 @@ function sanitizeTei(t: Partial<TeiSettings> | null | undefined): TeiSettings {
 
   return {
     enabled: t.enabled === true,
+    combinedReviewed: t.combinedReviewed === true,
+    enablementOverlapReviewed: t.enablementOverlapReviewed === true,
     copilotAdoptionPct: Math.round(
       bounded(t.copilotAdoptionPct, 100, DEFAULT_TEI_SETTINGS.copilotAdoptionPct),
     ),
@@ -181,10 +241,17 @@ function sanitizeAssumptions(
 
 
   return {
-    e7ListPupm: num('e7ListPupm', 0, 10_000),
+    e7ListPupm: num('e7ListPupm', 0, MAX_PUPM),
     e7DiscountPct: num('e7DiscountPct', 0, 100),
-    baselineUnitPupm: num('baselineUnitPupm', 0, 10_000),
+    baselineUnitPupm: num('baselineUnitPupm', 0, MAX_PUPM),
     horizonYears: Math.round(num('horizonYears', 1, 50)),
+    transitionEnabled: a.transitionEnabled === true,
+    transitionCost: num('transitionCost', 0, MAX_ANNUAL),
+    baselinePriceSource: a.baselinePriceSource === 'customer' || a.baselinePriceSource === 'reference'
+      ? a.baselinePriceSource : a.baselineUnitPupm === undefined ? 'reference' : 'legacy',
+    e7PriceSource: a.e7PriceSource === 'customer' || a.e7PriceSource === 'reference'
+      ? a.e7PriceSource : a.e7ListPupm === undefined ? 'reference' : 'legacy',
+    pricesConfirmed: a.pricesConfirmed === true,
     // Pinned, not read from the payload. These were percentage guesses stacked on top of the
     // customer's own numbers, and the levers for them no longer exist in the UI. Reading a
     // stored value here would silently re-apply the old haircut to anyone returning with a
@@ -207,18 +274,22 @@ export function sanitizeAssessment(a: Partial<Assessment> | null | undefined): A
       : base.seats;
 
   return {
+    schemaVersion: 2,
+    reviewWarnings: assessmentWarnings(a),
+    addOnsReviewed: a.addOnsReviewed === true,
+    isDemo: a.isDemo === true,
     orgName: typeof a.orgName === 'string' ? a.orgName : '',
     seats,
-    currency: typeof a.currency === 'string' && a.currency ? a.currency : 'USD',
+    // Recovery must not relabel legacy money. Strict import validation is separate.
+    currency: typeof a.currency === 'string' ? a.currency : 'USD',
     baseline,
     assumptions: sanitizeAssumptions(a.assumptions, baseline),
-    // Drop lines whose category no longer exists rather than carrying a ghost the user can
-    // neither see in the catalog nor edit away.
+    // Preserve unsupported invoice identities and their amounts for explicit review.
     lines: Array.isArray(a.lines)
-      ? a.lines.filter((l) => l && getCategory(l.categoryId)).map(sanitizeSpendLine)
+      ? a.lines.filter((l) => l && typeof l.categoryId === 'string').map(sanitizeSpendLine)
       : [],
     addOns: Array.isArray(a.addOns)
-      ? a.addOns.filter((x) => x && getAddOn(x.addOnId)).map(sanitizeAddOnLine)
+      ? a.addOns.filter((x) => x && typeof x.addOnId === 'string').map(sanitizeAddOnLine)
       : [],
     // Same ghost-category rule as lines, plus de-duplication, since this is a set in spirit.
     plannedCapabilities: Array.isArray(a.plannedCapabilities)
@@ -232,13 +303,128 @@ export function sanitizeAssessment(a: Partial<Assessment> | null | undefined): A
   };
 }
 
+const record = (value: unknown): value is Record<string, unknown> =>
+  !!value && typeof value === 'object' && !Array.isArray(value);
+
+/** Strict import/edit validation. Recovery sanitisation is reserved for old browser storage. */
+export function assessmentInputErrors(input: unknown): string[] {
+  if (!record(input)) return ['Assessment must be an object.'];
+  const errors: string[] = [];
+  const number = (value: unknown, label: string, max: number, integer = false, min = 0) => {
+    if (value === undefined) return;
+    if (typeof value !== 'number' || !Number.isFinite(value) || value < min || value > max ||
+        (integer && !Number.isInteger(value))) errors.push(`${label} must be ${integer ? 'a whole number' : 'a finite number'} between ${min} and ${max}.`);
+  };
+  if (input.baseline !== undefined && !isBaselineId(input.baseline)) errors.push(`Unknown baseline: ${String(input.baseline)}.`);
+  for (const key of ['isDemo', 'addOnsReviewed']) {
+    if (input[key] !== undefined && typeof input[key] !== 'boolean') errors.push(`${key} must be true or false.`);
+  }
+  if (input.currency !== undefined && input.currency !== 'USD') errors.push('Only USD assessments can be loaded. No FX conversion is performed; non-USD amounts cannot be relabeled as USD. Keep the original assessment and start a new USD assessment instead.');
+  number(input.seats, 'Seats', MAX_SEATS, true);
+  for (const collection of ['lines', 'addOns'] as const) {
+    if (input[collection] === undefined) continue;
+    if (!Array.isArray(input[collection])) { errors.push(`${collection} must be an array.`); continue; }
+    const seen = new Set<string>();
+    for (const [index, raw] of input[collection].entries()) {
+      const label = `${collection} row ${index + 1}`;
+      if (!record(raw)) { errors.push(`${label} must be an object.`); continue; }
+      const id = collection === 'lines' ? raw.categoryId : raw.addOnId === 'copilot-m365' ? 'copilot' : raw.addOnId;
+      if (typeof id !== 'string' || !(collection === 'lines' ? getCategory(id) : getAddOn(id))) errors.push(`${label} has an unknown catalog identity (${String(id)}); its amount has not been discarded.`);
+      if (typeof id === 'string') {
+        if (seen.has(id)) errors.push(`${label} duplicates ${id}; remove duplicate entries or combine distinct invoices into one entry before importing.`);
+        seen.add(id);
+      }
+      if (raw.mode !== 'annual' && raw.mode !== 'pupm') errors.push(`${label} has an invalid spend mode.`);
+      number(raw.seats, `${label} seats`, MAX_SEATS, true);
+      number(raw.pupm, `${label} monthly unit price`, MAX_PUPM);
+      number(raw.annual, `${label} annual amount`, MAX_ANNUAL);
+      number(raw.retainPct, `${label} retained percent`, 100);
+      number(raw.savingsDelayMonths, `${label} delay`, 1200, true);
+      if (raw.amountSource !== undefined && !['customer', 'benchmark', 'legacy'].includes(String(raw.amountSource))) errors.push(`${label} has an invalid amount source.`);
+      if (raw.assumptionConfirmed !== undefined && typeof raw.assumptionConfirmed !== 'boolean') errors.push(`${label} confirmation must be true or false.`);
+    }
+  }
+  if (input.assumptions !== undefined) {
+    if (!record(input.assumptions)) errors.push('Assumptions must be an object.');
+    else {
+      const a = input.assumptions;
+      for (const key of ['baselineUnitPupm', 'e7ListPupm']) number(a[key], key, MAX_PUPM);
+      number(a.e7DiscountPct, 'E7 discount', 100);
+      number(a.horizonYears, 'Horizon', 50, true, 1);
+      number(a.transitionCost, 'Transition cost', MAX_ANNUAL);
+      for (const key of ['transitionEnabled', 'pricesConfirmed']) {
+        if (a[key] !== undefined && typeof a[key] !== 'boolean') errors.push(`${key} must be true or false.`);
+      }
+      for (const key of ['baselinePriceSource', 'e7PriceSource']) {
+        if (a[key] !== undefined && !['customer', 'reference', 'legacy'].includes(String(a[key]))) errors.push(`${key} has an invalid provenance.`);
+      }
+    }
+  }
+  if (input.plannedCapabilities !== undefined &&
+      (!Array.isArray(input.plannedCapabilities) ||
+        input.plannedCapabilities.some((id) => typeof id !== 'string' || !getCategory(id)))) {
+    errors.push('Planned capabilities must contain only known category identities.');
+  }
+  if (input.tei !== undefined) {
+    if (!record(input.tei)) errors.push('TEI settings must be an object.');
+    else {
+      const t = input.tei;
+      number(t.copilotAdoptionPct, 'Copilot adoption', 100);
+      number(t.confidencePct, 'Study scenario confidence', 100);
+      for (const key of ['enabled', 'combinedReviewed', 'includeEnablementCost', 'enablementOverlapReviewed']) {
+        if (t[key] !== undefined && typeof t[key] !== 'boolean') errors.push(`TEI ${key} must be true or false.`);
+      }
+      if (t.lineOverrides !== undefined && (!record(t.lineOverrides) ||
+          Object.entries(t.lineOverrides).some(([id, on]) => !getTeiLine(id) || typeof on !== 'boolean'))) {
+        errors.push('TEI selections must use known study line identities and true/false values.');
+      }
+    }
+  }
+  return errors;
+}
+
+function assessmentWarnings(a: Partial<Assessment>): string[] {
+  const warnings = Array.isArray(a.reviewWarnings) ? a.reviewWarnings.filter((w) => typeof w === 'string') : [];
+  warnings.push(...assessmentInputErrors(a));
+  for (const [collection, rows] of [['lines', a.lines], ['addOns', a.addOns]] as const) {
+    if (!Array.isArray(rows)) continue;
+    for (const [index, line] of rows.entries()) {
+      if (line && (line.mode === 'annual' ? line.annual === undefined : line.pupm === undefined)) {
+        warnings.push(`${collection} row ${index + 1} has no amount entered. Its spend is unknown, not an explicit zero.`);
+      }
+    }
+  }
+  if ((a.lines ?? []).some?.((l) => l && !l.amountSource) ||
+      (a.addOns ?? []).some?.((l) => l && !l.amountSource)) {
+    warnings.push('Legacy invoice amounts were preserved. Their provenance remains unknown. Model 3 assumes full replacement of mapped, covered USD invoices; this scenario assumption is not customer verification or licensing certification.');
+  }
+  if ([...(Array.isArray(a.lines) ? a.lines : []), ...(Array.isArray(a.addOns) ? a.addOns : [])]
+      .some((line) => line && typeof line.retainPct === 'number' && line.retainPct !== 0)) {
+    warnings.push('Legacy retained-spend percentages are preserved for audit but no longer applied. Model 3 assumes full replacement of covered USD invoices, except unknown or duplicate/bundled entries.');
+  }
+  const old = a.assumptions;
+  if (old && (old.migrationCostPerSeat > 0 || (old.year1RealizationPct !== undefined && old.year1RealizationPct !== 100) ||
+      Object.values(old.conservative ?? {}).some((v) => v !== 1) ||
+      Object.values(old.bestCase ?? {}).some((v) => v !== 1))) {
+    warnings.push(`Legacy percentage discounts, realization and per-seat migration assumptions are no longer applied (old migration ${old.migrationCostPerSeat ?? 0}/seat, realization ${old.year1RealizationPct ?? 100}%). Enter an explicit one-time transition cost and line delays if needed.`);
+  }
+  if (typeof a.currency === 'string' && a.currency !== 'USD') {
+    warnings.push('Existing non-USD amounts and their original currency were preserved, not converted. Cash estimates are blocked. Download the raw inputs for recovery, then explicitly start a new USD assessment.');
+  }
+  return [...new Set(warnings)];
+}
+
 function stripDismissed(s: Assessment & { dismissed: string[] }): Assessment {
   const { dismissed: _dismissed, ...rest } = s;
   return rest;
 }
 
-function baseState(): Assessment & { dismissed: string[] } {
+function baseState(): Assessment & { dismissed: string[]; addOnsReviewed: boolean; isDemo: boolean } {
   return {
+    schemaVersion: 2,
+    reviewWarnings: [],
+    addOnsReviewed: false,
+    isDemo: false,
     orgName: '',
     seats: 2500,
     currency: 'USD',
@@ -252,54 +438,6 @@ function baseState(): Assessment & { dismissed: string[] } {
   };
 }
 
-/**
- * A realistic mid-size enterprise: on E5, already double-paying for identity, endpoint and
- * email security, plus a ChatGPT Enterprise pilot and a Zscaler estate. This is the shape
- * of customer the tool exists for.
- */
-function demoState(): Assessment & { dismissed: string[] } {
-  return {
-    orgName: 'Northwind Traders',
-    seats: 4200,
-    currency: 'USD',
-    baseline: 'm365e5',
-    assumptions: {
-      ...DEFAULT_ASSUMPTIONS,
-      baselineUnitPupm: 54,
-      e7DiscountPct: 8,
-      migrationCostPerSeat: 12,
-      year1RealizationPct: 60,
-    },
-    lines: [
-      { categoryId: 'genai-assistant', vendor: 'ChatGPT Enterprise', mode: 'pupm', pupm: 30, seats: 1200, retainPct: 10 },
-      { categoryId: 'sso-mfa', vendor: 'Okta Workforce Identity', mode: 'pupm', pupm: 6, retainPct: 0 },
-      { categoryId: 'ztna', vendor: 'Zscaler Private Access', mode: 'annual', annual: 310_000, retainPct: 0 },
-      { categoryId: 'swg', vendor: 'Zscaler Internet Access', mode: 'annual', annual: 265_000, retainPct: 15 },
-      { categoryId: 'edr-xdr', vendor: 'CrowdStrike Falcon', mode: 'pupm', pupm: 8.5, retainPct: 0 },
-      { categoryId: 'email-security', vendor: 'Proofpoint', mode: 'pupm', pupm: 5, retainPct: 0 },
-      { categoryId: 'uem', vendor: 'Jamf Pro', mode: 'pupm', pupm: 8, seats: 900, retainPct: 40 },
-      { categoryId: 'business-intelligence', vendor: 'Tableau', mode: 'pupm', pupm: 42, seats: 300, retainPct: 20 },
-      { categoryId: 'file-storage', vendor: 'Box', mode: 'pupm', pupm: 15, seats: 1800, retainPct: 0 },
-      { categoryId: 'ai-notetaker', vendor: 'Otter.ai', mode: 'pupm', pupm: 12, seats: 600, retainPct: 0 },
-      { categoryId: 'security-awareness', vendor: 'KnowBe4', mode: 'pupm', pupm: 2.5, retainPct: 0 },
-      { categoryId: 'siem-soar', vendor: 'Splunk Enterprise Security', mode: 'annual', annual: 620_000, retainPct: 0 },
-      { categoryId: 'esignature', vendor: 'DocuSign', mode: 'annual', annual: 96_000, retainPct: 0 },
-    ],
-    addOns: [
-      { addOnId: 'copilot', mode: 'pupm', pupm: 30, seats: 800 },
-      { addOnId: 'entra-id-governance', mode: 'pupm', pupm: 7 },
-      { addOnId: 'teams-calling-plan', mode: 'pupm', pupm: 12, seats: 2100 },
-    ],
-    // Capabilities Northwind has no vendor for today and would switch on under E7. Kept small
-    // and plausible on purpose: the point is illustrative value, not a maximal number.
-    plannedCapabilities: ['agent-governance', 'identity-governance', 'verified-id'],
-    // Deliberately left off even in the demo. The gate is the whole point: an extrapolated
-    // number should never be the first thing anyone sees, including in a canned scenario.
-    tei: { ...DEFAULT_TEI_SETTINGS },
-    dismissed: [],
-  };
-}
-
 export const useAssessment = create<AssessmentState>()(
   persist(
     (set, get) => ({
@@ -308,9 +446,11 @@ export const useAssessment = create<AssessmentState>()(
       started: false,
       flash: null,
       sellerMode: false,
-      theme: 'dark',
+      theme: 'light',
+      storageStatus: lastStorageStatus,
+      storageError: lastStorageError,
 
-      setStep: (step) => set({ step }),
+      setStep: (step) => { if (STEP_ORDER.includes(step)) set({ step }); },
       next: () => {
         const i = STEP_ORDER.indexOf(get().step);
         if (i < STEP_ORDER.length - 1) set({ step: STEP_ORDER[i + 1] });
@@ -322,8 +462,15 @@ export const useAssessment = create<AssessmentState>()(
       start: () => set({ started: true, step: 'profile' }),
 
       setOrgName: (orgName) => set({ orgName }),
-      setSeats: (seats) => set({ seats: Math.max(0, Math.round(seats) || 0) }),
-      setCurrency: (currency) => set({ currency }),
+      setSeats: (seats) => {
+        const errors = assessmentInputErrors({ seats });
+        if (errors.length) { set({ flash: errors.join(' ') }); return; }
+        set((s) => ({ seats, tei: { ...s.tei, combinedReviewed: false, enablementOverlapReviewed: false } }));
+      },
+      setCurrency: (currency) => {
+        if (currency === get().currency) return;
+        set({ flash: 'Currency was not changed. Only USD cash estimates are supported and no FX conversion is performed. Download any legacy inputs before explicitly starting a new USD assessment; existing amounts cannot be relabeled.' });
+      },
 
       // Changing baseline re-seeds the assumed unit price, since the previous figure
       // was anchored to a different suite.
@@ -332,24 +479,64 @@ export const useAssessment = create<AssessmentState>()(
           const next = isBaselineId(baseline) ? baseline : DEFAULT_BASELINE;
           return {
             baseline: next,
+            addOnsReviewed: false,
             assumptions: {
               ...s.assumptions,
-              baselineUnitPupm: getBaseline(next).listPricePupm,
+              baselineUnitPupm: s.assumptions.baselinePriceSource === 'customer'
+                ? s.assumptions.baselineUnitPupm : getBaseline(next).listPricePupm,
+              pricesConfirmed: false,
             },
+            lines: s.lines.map((line) => ({ ...line, assumptionConfirmed: false })),
+            addOns: s.addOns.map((line) => ({ ...line, assumptionConfirmed: false })),
+            tei: { ...s.tei, combinedReviewed: false, enablementOverlapReviewed: false },
           };
         }),
 
-      setAssumptions: (patch) =>
-        set((s) => ({ assumptions: { ...s.assumptions, ...patch } })),
+      setAssumptions: (patch) => {
+        const errors = assessmentInputErrors({ assumptions: patch });
+        if (errors.length) { set({ flash: errors.join(' ') }); return; }
+        set((s) => ({
+          assumptions: sanitizeAssumptions({
+            ...s.assumptions, ...patch,
+            ...(['baselineUnitPupm', 'e7ListPupm', 'e7DiscountPct', 'baselinePriceSource', 'e7PriceSource'].some((key) =>
+              Object.prototype.hasOwnProperty.call(patch, key)) && patch.pricesConfirmed === undefined
+              ? { pricesConfirmed: false } : {}),
+            ...(patch.baselineUnitPupm !== undefined && patch.baselinePriceSource === undefined ? { baselinePriceSource: 'customer' } : {}),
+            ...(patch.e7ListPupm !== undefined && patch.e7PriceSource === undefined ? { e7PriceSource: 'customer' } : {}),
+          }, s.baseline),
+          tei: {
+            ...s.tei, combinedReviewed: false,
+            ...('transitionCost' in patch || 'transitionEnabled' in patch ? { enablementOverlapReviewed: false } : {}),
+          },
+        }));
+      },
+      setReviewWarnings: (reviewWarnings) => set({ reviewWarnings }),
+      setAddOnsReviewed: (addOnsReviewed) => set({ addOnsReviewed }),
+      confirmLineAssumption: (categoryId, confirmed) => set((s) => ({
+        lines: s.lines.map((line) => line.categoryId === categoryId ? { ...line, assumptionConfirmed: confirmed } : line),
+        tei: { ...s.tei, combinedReviewed: false },
+      })),
+      confirmAddOnAssumption: (addOnId, confirmed) => set((s) => ({
+        addOns: s.addOns.map((line) => line.addOnId === addOnId ? { ...line, assumptionConfirmed: confirmed } : line),
+        tei: { ...s.tei, combinedReviewed: false },
+      })),
+      setTeiCombinedReviewed: (combinedReviewed) => set((s) => ({ tei: { ...s.tei, combinedReviewed } })),
+      setTeiEnablementOverlapReviewed: (enablementOverlapReviewed) => set((s) => ({
+        tei: { ...s.tei, enablementOverlapReviewed, combinedReviewed: false },
+      })),
 
       upsertLine: (line) =>
         set((s) => {
+          const errors = assessmentInputErrors({ lines: [line] });
+          if (errors.length) return { flash: errors.join(' ') };
           const existing = s.lines.findIndex((l) => l.categoryId === line.categoryId);
           const lines = [...s.lines];
-          if (existing >= 0) lines[existing] = line;
-          else lines.push(line);
+          const clean = sanitizeSpendLine({ ...line, amountSource: line.amountSource ?? 'customer' });
+          if (existing >= 0) lines[existing] = clean;
+          else lines.push(clean);
           return {
             lines,
+            tei: { ...s.tei, combinedReviewed: false },
             dismissed: s.dismissed.filter((d) => d !== line.categoryId),
             // Once there is real spend against a category it is a cash saving, not avoided
             // cost. Dropping it here stops the same capability being counted on both sides.
@@ -358,24 +545,17 @@ export const useAssessment = create<AssessmentState>()(
         }),
 
       removeLine: (categoryId) =>
-        set((s) => ({ lines: s.lines.filter((l) => l.categoryId !== categoryId) })),
+        set((s) => ({ lines: s.lines.filter((l) => l.categoryId !== categoryId), tei: { ...s.tei, combinedReviewed: false } })),
 
       dismissCategory: (categoryId) =>
         set((s) => {
-          const cat = getCategory(categoryId);
-          const cov = cat?.coverage[s.baseline];
-          // "We don't pay for this" on something E7 unlocks is precisely a confirmed capability
-          // gap, so pre-select it for cost avoidance. The user can still untick it on results.
-          const isGain = cov === 'unlocked' || cov === 'upgrade';
+          if (!getCategory(categoryId)) return s;
           return {
             lines: s.lines.filter((l) => l.categoryId !== categoryId),
             dismissed: s.dismissed.includes(categoryId)
               ? s.dismissed
               : [...s.dismissed, categoryId],
-            plannedCapabilities:
-              isGain && !s.plannedCapabilities.includes(categoryId)
-                ? [...s.plannedCapabilities, categoryId]
-                : s.plannedCapabilities,
+            tei: { ...s.tei, combinedReviewed: false },
           };
         }),
 
@@ -383,7 +563,7 @@ export const useAssessment = create<AssessmentState>()(
         set((s) => ({ dismissed: s.dismissed.filter((d) => d !== categoryId) })),
 
       togglePlannedCapability: (categoryId) =>
-        set((s) => ({
+        set((s) => !getCategory(categoryId) ? s : ({
           plannedCapabilities: s.plannedCapabilities.includes(categoryId)
             ? s.plannedCapabilities.filter((p) => p !== categoryId)
             : [...s.plannedCapabilities, categoryId],
@@ -396,43 +576,65 @@ export const useAssessment = create<AssessmentState>()(
 
       upsertAddOn: (line) =>
         set((s) => {
+          const errors = assessmentInputErrors({ addOns: [line] });
+          if (errors.length) return { flash: errors.join(' ') };
           const existing = s.addOns.findIndex((a) => a.addOnId === line.addOnId);
           const addOns = [...s.addOns];
-          if (existing >= 0) addOns[existing] = line;
-          else addOns.push(line);
-          return { addOns };
+          const clean = sanitizeAddOnLine({ ...line, amountSource: line.amountSource ?? 'customer' });
+          if (existing >= 0) addOns[existing] = clean;
+          else addOns.push(clean);
+          return { addOns, addOnsReviewed: false, tei: { ...s.tei, combinedReviewed: false } };
         }),
 
       removeAddOn: (addOnId) =>
-        set((s) => ({ addOns: s.addOns.filter((a) => a.addOnId !== addOnId) })),
+        set((s) => ({ addOns: s.addOns.filter((a) => a.addOnId !== addOnId), addOnsReviewed: false, tei: { ...s.tei, combinedReviewed: false } })),
 
       toggleTei: () => set((s) => ({ tei: { ...s.tei, enabled: !s.tei.enabled } })),
 
       setTeiLineOverride: (lineId, on) =>
         set((s) => {
           if (!getTeiLine(lineId)) return s;
-          return { tei: { ...s.tei, lineOverrides: { ...s.tei.lineOverrides, [lineId]: on } } };
+          return { tei: { ...s.tei, combinedReviewed: false, lineOverrides: { ...s.tei.lineOverrides, [lineId]: on } } };
         }),
 
-      resetTeiLines: () => set((s) => ({ tei: { ...s.tei, lineOverrides: {} } })),
+      resetTeiLines: () => set((s) => ({ tei: { ...s.tei, combinedReviewed: false, lineOverrides: {} } })),
 
       setTeiAdoption: (pct) =>
-        set((s) => ({ tei: { ...s.tei, copilotAdoptionPct: clampPct(pct) } })),
+        set((s) => ({ tei: { ...s.tei, combinedReviewed: false, enablementOverlapReviewed: false, copilotAdoptionPct: clampPct(pct) } })),
 
-      setTeiConfidence: (pct) => set((s) => ({ tei: { ...s.tei, confidencePct: clampPct(pct) } })),
+      setTeiConfidence: (pct) => set((s) => ({ tei: { ...s.tei, combinedReviewed: false, confidencePct: clampPct(pct) } })),
 
       toggleTeiEnablementCost: () =>
-        set((s) => ({ tei: { ...s.tei, includeEnablementCost: !s.tei.includeEnablementCost } })),
+        set((s) => ({
+          tei: {
+            ...s.tei, combinedReviewed: false,
+            includeEnablementCost: !s.tei.includeEnablementCost,
+            enablementOverlapReviewed: s.tei.includeEnablementCost && s.tei.enablementOverlapReviewed === true,
+          },
+        })),
 
       toggleSellerMode: () => set((s) => ({ sellerMode: !s.sellerMode })),
       toggleTheme: () => set((s) => ({ theme: s.theme === 'dark' ? 'light' : 'dark' })),
 
-      loadDemo: () => set({ ...demoState(), started: true, step: 'results', flash: null }),
-      reset: () => set({ ...baseState(), started: false, step: 'profile', flash: null }),
+      loadDemo: () => {
+        const demo = createDemoAssessment();
+        get().hydrate({
+          ...demo,
+          isDemo: true,
+          lines: demo.lines.map((line) => ({ ...line, amountSource: 'benchmark', assumptionConfirmed: false })),
+          addOns: demo.addOns.map((line) => ({ ...line, amountSource: 'benchmark', assumptionConfirmed: false })),
+        });
+      },
+      reset: () => { storageWriteBlocked = false; set({ ...baseState(), started: false, step: 'profile', flash: null }); },
       hydrate: (a, flash) => {
+        const errors = assessmentInputErrors(a);
+        if (errors.length) { set({ flash: `Assessment was not replaced. ${errors.join(' ')}` }); return; }
         const clean = sanitizeAssessment(a);
+        storageWriteBlocked = false;
         set({
           ...clean,
+          addOnsReviewed: clean.addOnsReviewed === true,
+          isDemo: clean.isDemo === true,
           // A freshly imported assessment carries its own answers; keeping the previous
           // session's dismissals would mark categories as "answered" that this one never saw.
           dismissed: [],
@@ -445,9 +647,31 @@ export const useAssessment = create<AssessmentState>()(
     }),
     {
       name: 'me7-assessment',
-      version: 1,
+      storage: assessmentStorage,
+      onRehydrateStorage: () => (_state, error) => {
+        if (error) {
+          storageWriteBlocked = true;
+          storageState('Saved browser assessment could not be read. Saving is paused to preserve that data; restore a valid JSON export or reset explicitly.', 'paused');
+        }
+      },
+      version: 3,
+      migrate: (persisted) => {
+        const previous = persisted as AssessmentState;
+        return {
+          ...previous,
+          tei: { ...previous.tei, combinedReviewed: false },
+          reviewWarnings: [
+            ...(Array.isArray(previous.reviewWarnings) ? previous.reviewWarnings : []),
+            'Model 3 uses full replacement for covered USD invoices and absorbed add-ons. Legacy retained percentages and amount confirmations no longer affect credit; this is a scenario assumption, not customer verification or licensing certification. Transition costs and delays remain applied when enabled. Combined TEI review must be renewed.',
+          ],
+        };
+      },
       // Spend data is sensitive, so it stays in this browser and nowhere else.
       partialize: (s) => ({
+        schemaVersion: s.schemaVersion,
+        reviewWarnings: s.reviewWarnings,
+        addOnsReviewed: s.addOnsReviewed,
+        isDemo: s.isDemo,
         orgName: s.orgName,
         seats: s.seats,
         currency: s.currency,
@@ -469,13 +693,14 @@ export const useAssessment = create<AssessmentState>()(
         const p = (persisted ?? {}) as Partial<AssessmentState>;
         return {
           ...current,
-          ...p,
           ...sanitizeAssessment(p),
+          addOnsReviewed: p.addOnsReviewed === true,
+          isDemo: p.isDemo === true,
           dismissed: Array.isArray(p.dismissed)
             ? p.dismissed.filter((d) => typeof d === 'string' && getCategory(d))
             : [],
           step: STEP_ORDER.includes(p.step as StepId) ? (p.step as StepId) : 'profile',
-          theme: p.theme === 'light' ? 'light' : 'dark',
+          theme: p.theme === 'dark' ? 'dark' : 'light',
           sellerMode: p.sellerMode === true,
           started: p.started === true,
           // Never restored from storage: a confirmation is only meaningful in the moment.
@@ -486,9 +711,20 @@ export const useAssessment = create<AssessmentState>()(
   ),
 );
 
+reportStorageError = (message, status) => useAssessment.setState((s) => ({
+  storageStatus: status,
+  storageError: message,
+  ...(message ? { flash: message } : s.flash === s.storageError ? { flash: null } : {}),
+}));
+if (lastStorageError) reportStorageError(lastStorageError, lastStorageStatus);
+
 /** Narrow the store down to the plain Assessment the engine expects. */
 export function toAssessment(s: AssessmentState): Assessment {
   return {
+    schemaVersion: s.schemaVersion,
+    reviewWarnings: s.reviewWarnings,
+    addOnsReviewed: s.addOnsReviewed,
+    isDemo: s.isDemo,
     orgName: s.orgName,
     seats: s.seats,
     currency: s.currency,

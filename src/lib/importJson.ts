@@ -1,11 +1,11 @@
 import type { Assessment } from '@/model/types';
-import { sanitizeAssessment } from '@/store/useAssessment';
+import { assessmentInputErrors, sanitizeAssessment } from '@/store/useAssessment';
 
 export type ImportResult =
-  | { ok: true; assessment: Assessment; warning?: string }
+  | { ok: true; assessment: Assessment; warning?: string; warnings?: string[] }
   | { ok: false; error: string };
 
-const SCHEMA = 'me7-assessment/1';
+const SCHEMAS = ['me7-assessment/1', 'me7-assessment/2'];
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -40,8 +40,8 @@ export function parseAssessmentExport(text: string): ImportResult {
   if (isRecord(parsed) && 'assessment' in parsed) {
     candidate = parsed.assessment;
     const schema = parsed.schema;
-    if (typeof schema === 'string' && schema !== SCHEMA) {
-      warning = `Saved by a different version of this app (${schema}). Anything unrecognised was reset to a default.`;
+    if (typeof schema === 'string' && !SCHEMAS.includes(schema)) {
+      return { ok: false, error: `Unsupported assessment schema (${schema}). Your current assessment has not been replaced.` };
     }
   }
 
@@ -52,8 +52,12 @@ export function parseAssessmentExport(text: string): ImportResult {
     };
   }
 
+  const errors = assessmentInputErrors(candidate);
+  if (errors.length) return { ok: false, error: `Assessment was not imported. ${errors.join(' ')}` };
   const assessment = sanitizeAssessment(candidate);
-  return warning ? { ok: true, assessment, warning } : { ok: true, assessment };
+  const warnings = assessment.reviewWarnings ?? [];
+  warning = warnings.length ? warnings.join(' ') : undefined;
+  return { ok: true, assessment, warning, warnings };
 }
 
 /** Describes what was recovered, so the user can tell at a glance whether it was the right file. */

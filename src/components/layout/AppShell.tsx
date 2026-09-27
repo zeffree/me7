@@ -1,209 +1,108 @@
-import { useEffect, type ReactNode } from 'react';
-import { Check, Moon, Presentation, RotateCcw, Sun } from 'lucide-react';
-import { STEP_ORDER, useAssessment, type StepId } from '@/store/useAssessment';
-import { cx } from '@/lib/format';
+import type { ReactNode } from 'react';
+import { ArrowLeft, ArrowRight, Building2, ChartNoAxesCombined, Layers3, Moon, Presentation, RotateCcw, SlidersHorizontal, Sun, WalletCards } from 'lucide-react';
+import { useAssessment, toAssessment, type StepId } from '@/store/useAssessment';
+import { computeAssessment } from '@/model/engine';
+import { CATEGORIES } from '@/data/categories';
+import { formatCurrency } from '@/lib/format';
+import { Button, ProgressBar } from '@/components/ui/Primitives';
+import { answeredCategoryCount } from '@/components/catalog/inventory';
+import { APP_ROUTES, type AppPage } from './appRoute';
 
-const STEP_LABELS: Record<StepId, string> = {
-  profile: 'Profile',
-  quick: 'Quick scan',
-  catalog: 'Full catalog',
-  addons: 'Microsoft add-ons',
-  assumptions: 'Assumptions',
-  results: 'Results',
-};
+const STAGES: { id: StepId; label: string }[] = [
+  { id: 'profile', label: 'Organization' }, { id: 'quick', label: 'Current spend' },
+  { id: 'addons', label: 'Microsoft add-ons' }, { id: 'assumptions', label: 'Review' }, { id: 'results', label: 'Business case' },
+];
+const STAGE_ICONS = [Building2, WalletCards, Layers3, SlidersHorizontal, ChartNoAxesCombined];
 
-export function AppShell({ children }: { children: ReactNode }) {
-  const { theme, toggleTheme, sellerMode, toggleSellerMode, reset, started } = useAssessment();
-
-  useEffect(() => {
-    document.documentElement.classList.toggle('dark', theme === 'dark');
-  }, [theme]);
-
-  return (
-    <div className="min-h-screen">
-      <a
-        href="#main-content"
-        className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:rounded-xl focus:bg-brand-600 focus:px-4 focus:py-2.5 focus:text-sm focus:font-bold focus:text-white"
-      >
-        Skip to main content
-      </a>
-      <header className="no-print sticky top-0 z-40 border-b border-subtle bg-[var(--surface-sunken)]/85 backdrop-blur-xl">
-        <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3 sm:px-6">
-          <div className="flex items-center gap-2.5">
-            <span
-              aria-hidden
-              className="grid h-8 w-8 place-items-center rounded-lg bg-gradient-to-br from-brand-500 to-accent-500 text-sm font-black text-white"
-            >
-              E7
-            </span>
-            <div className="leading-tight">
-              <p className="text-sm font-bold">Consolidation Assessment</p>
-              <p className="hidden text-xs text-muted sm:block">
-                What Microsoft 365 E7 actually nets out to
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-1.5">
-            <button
-              type="button"
-              onClick={toggleSellerMode}
-              aria-pressed={sellerMode}
-              title="Seller / presenter mode: adds competitive battlecards and discovery questions to every catalog card, plus a full presenter workspace on the results — deal snapshot, talking points built from these numbers, objection handling and a copyable executive summary"
-              className={cx(
-                'inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition-colors',
-                'min-h-10',
-                sellerMode
-                  ? 'border-brand-500 bg-brand-500/12 text-brand-700 dark:text-brand-300'
-                  : 'border-subtle text-secondary hover:text-[var(--text-primary)]',
-              )}
-            >
-              <Presentation className="h-3.5 w-3.5" aria-hidden />
-              <span className="hidden sm:inline">Seller mode</span>
-              {sellerMode && <Check className="h-3 w-3" aria-hidden />}
-            </button>
-
-            {started && (
-              <button
-                type="button"
-                onClick={() => {
-                  if (confirm('Clear this assessment and start over?')) reset();
-                }}
-                className="grid min-h-10 min-w-10 place-items-center rounded-lg border border-subtle p-2 text-secondary transition-colors hover:text-[var(--text-primary)]"
-                aria-label="Start over"
-                title="Start over"
-              >
-                <RotateCcw className="h-4 w-4" aria-hidden />
-              </button>
-            )}
-
-            <button
-              type="button"
-              onClick={toggleTheme}
-              className="grid min-h-10 min-w-10 place-items-center rounded-lg border border-subtle p-2 text-secondary transition-colors hover:text-[var(--text-primary)]"
-              aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`}
-            >
-              {theme === 'dark' ? (
-                <Sun className="h-4 w-4" aria-hidden />
-              ) : (
-                <Moon className="h-4 w-4" aria-hidden />
-              )}
-            </button>
-          </div>
+export function AppShell({ children, onHome, onAssessment, page = 'assessment' }: {
+  children: ReactNode; onHome: () => void; onAssessment: () => void; page?: AppPage;
+}) {
+  const state = useAssessment();
+  const storageError = 'storageError' in state && typeof state.storageError === 'string' ? state.storageError : null;
+  const assessmentMode = page === 'assessment';
+  const showAssessmentControls = page !== 'architecture' && page !== 'experience';
+  const { mainId } = APP_ROUTES[page];
+  return <div className="app-shell">
+    <a href={`#${mainId}`} className="skip-link">Skip to main content</a>
+    <header className="site-header no-print">
+      <div className="header-inner">
+        <button className="wordmark" onClick={onHome} aria-label="E7 assessment home"><span className="wordmark-mark">E7</span><span><strong>Consolidation assessment</strong><small>An independent financial working tool</small></span></button>
+        <nav className="page-nav" aria-label="Main navigation">
+          <a href={APP_ROUTES.assessment.href} onClick={event => {
+            if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+            event.preventDefault();
+            onAssessment();
+          }} aria-current={assessmentMode ? 'page' : undefined}>Assessment</a>
+          <a href={APP_ROUTES.experience.href} aria-current={page === 'experience' ? 'page' : undefined}>Experience E7</a>
+          <a href={APP_ROUTES.architecture.href} aria-current={page === 'architecture' ? 'page' : undefined}>E7 in action</a>
+        </nav>
+        <div className="header-actions">
+          {showAssessmentControls && <span className={`save-status ${storageError ? 'error' : ''}`}>{storageError ? 'Not saved · export a copy' : 'Local browser workspace'}</span>}
+          {showAssessmentControls && <Button variant="ghost" size="sm" className={state.sellerMode ? 'active' : ''} aria-pressed={state.sellerMode} aria-label="Toggle presenter guidance" onClick={state.toggleSellerMode}><Presentation /><span className="header-action-label">Presenter</span></Button>}
+          {showAssessmentControls && state.started && <Button variant="ghost" className="icon-button" aria-label="Start a new assessment" onClick={() => {
+            if (window.confirm('Clear this assessment and start again? Export a JSON copy first if you want to keep it.')) { state.reset(); onHome(); }
+          }}><RotateCcw /></Button>}
+          <Button variant="ghost" className="icon-button" onClick={state.toggleTheme} aria-label={`Use ${state.theme === 'dark' ? 'light' : 'dark'} theme`}>{state.theme === 'dark' ? <Sun /> : <Moon />}</Button>
         </div>
-      </header>
-
-      <main id="main-content">{children}</main>
-
-      <footer className="border-t border-subtle px-4 py-8 text-center sm:px-6 print:py-4">
-        <div className="mx-auto max-w-2xl space-y-3 text-xs leading-relaxed text-muted">
-          <p className="no-print">
-            Prices are date-stamped list prices and every figure is editable. Your spend data is
-            stored in this browser and is never uploaded.
-          </p>
-          <p className="border-t border-subtle pt-3 print:border-0 print:pt-0 print:text-black">
-            Estimates only — not an official Microsoft quote. This is a personal project by Zeffree
-            Kan and is not affiliated with, endorsed by, or an official tool of Microsoft. Feedback
-            and suggestions are welcome at{' '}
-            <a
-              href="mailto:zeffree@live.com?subject=M365%20E7%20savings%20tool%20feedback"
-              className="rounded-sm font-medium text-secondary underline decoration-dotted underline-offset-2 transition-colors hover:text-brand-600 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600 dark:hover:text-brand-300 print:text-black"
-            >
-              zeffree@live.com
-            </a>
-            .
-          </p>
-        </div>
-      </footer>
-    </div>
-  );
+      </div>
+    </header>
+    {showAssessmentControls && storageError && <div className="flash no-print" role="alert">{storageError}</div>}
+    <main id={mainId} tabIndex={-1}>{children}</main>
+    <footer className="site-footer">
+      {showAssessmentControls && <p className="no-print">Assessment calculations run in your browser. Local storage can be unavailable or cleared. Export a JSON copy to keep your work. Shared links contain your inputs and are not encrypted.</p>}
+      <p>Estimates only — not an official Microsoft quote. This is a personal project by Zeffree Kan, not affiliated with, endorsed by, or an official tool of Microsoft. Feedback: <a href="mailto:zeffree@live.com?subject=M365%20E7%20assessment%20feedback">zeffree@live.com</a>.</p>
+      <p className="no-print"><a href={APP_ROUTES.audit.href} aria-current={page === 'audit' ? 'page' : undefined}>Audit &amp; review reference</a></p>
+    </footer>
+  </div>;
 }
 
 export function Stepper() {
-  const { step, setStep } = useAssessment();
-  const currentIndex = STEP_ORDER.indexOf(step);
-
-  return (
-    <nav aria-label="Assessment progress" className="no-print border-b border-subtle">
-      <ol className="mx-auto flex max-w-7xl flex-wrap gap-1 px-4 py-3 sm:px-6">
-        {STEP_ORDER.map((s, i) => {
-          const state = i === currentIndex ? 'current' : i < currentIndex ? 'done' : 'todo';
-          return (
-            <li key={s} className="shrink-0">
-              <button
-                type="button"
-                onClick={() => setStep(s)}
-                aria-current={state === 'current' ? 'step' : undefined}
-                className={cx(
-                  'flex min-h-11 items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold transition-colors',
-                  state === 'current' && 'bg-brand-600 text-white',
-                  state === 'done' &&
-                    'text-brand-600 hover:bg-brand-500/10 dark:text-brand-300',
-                  state === 'todo' && 'text-muted hover:text-secondary',
-                )}
-              >
-                <span
-                  className={cx(
-                    'grid h-5 w-5 place-items-center rounded-full text-[10px] font-black',
-                    state === 'current' && 'bg-white/25',
-                    state === 'done' && 'bg-brand-500/20',
-                    state === 'todo' && 'bg-ink-500/15',
-                  )}
-                >
-                  {state === 'done' ? <Check className="h-3 w-3" aria-hidden /> : i + 1}
-                </span>
-                {STEP_LABELS[s]}
-              </button>
-            </li>
-          );
-        })}
-      </ol>
-    </nav>
-  );
+  const s = useAssessment();
+  const reviewed = answeredCategoryCount(s.lines, s.dismissed);
+  const descriptions = {
+    profile: `${s.seats.toLocaleString()} seats · ${s.currency}`,
+    quick: `${reviewed}/${CATEGORIES.length} categories answered`,
+    addons: `${s.addOns.length} invoice lines`,
+    assumptions: 'Prices, overlap & timing',
+    results: 'Entered items only',
+  };
+  return <nav className="stage-nav no-print" aria-label="Assessment stages"><ol>{STAGES.map((stage, i) => {
+    const active = s.step === stage.id || (stage.id === 'quick' && s.step === 'catalog');
+    const Icon = STAGE_ICONS[i];
+    return <li key={stage.id}><button onClick={() => s.setStep(stage.id)} aria-current={active ? 'step' : undefined}><span className="stage-number" aria-hidden="true"><Icon /></span><span><strong><span className="stage-order">{i + 1}.</span> {stage.label}</strong><small>{descriptions[stage.id as keyof typeof descriptions]}</small></span></button></li>;
+  })}</ol></nav>;
 }
 
-export function StepFooter({
-  onNext,
-  nextLabel = 'Continue',
-  nextDisabled,
-  children,
-}: {
-  onNext?: () => void;
-  nextLabel?: string;
-  nextDisabled?: boolean;
-  children?: ReactNode;
-}) {
-  const { back, next, step } = useAssessment();
-  const isFirst = STEP_ORDER.indexOf(step) === 0;
-
-  return (
-    <div className="no-print mt-10 flex flex-wrap items-center justify-between gap-3 border-t border-subtle pt-6">
-      <div>
-        {!isFirst && (
-          <button
-            type="button"
-            onClick={back}
-            className="min-h-11 rounded-xl px-4 py-2.5 text-sm font-semibold text-secondary transition-colors hover:text-[var(--text-primary)]"
-          >
-            Back
-          </button>
-        )}
-      </div>
-      <div className="flex flex-wrap items-center gap-3">
-        {children}
-        <button
-          type="button"
-          onClick={onNext ?? next}
-          disabled={nextDisabled}
-          className="rounded-xl bg-brand-600 px-6 py-2.5 text-sm font-bold text-white shadow-sm transition-colors hover:bg-brand-500 disabled:cursor-not-allowed disabled:opacity-45"
-        >
-          {nextLabel}
-        </button>
-      </div>
-    </div>
-  );
+function Ledger() {
+  const s = useAssessment();
+  const r = computeAssessment(toAssessment(s));
+  const benefit = r.netAnnualConservative;
+  return <div className="ledger">
+    <div className="ledger-caption"><h2>Working estimate</h2><span>{s.currency} / year</span></div>
+    <dl><div><dt>Current recurring spend</dt><dd>{formatCurrency(r.currentAnnualTotal, s.currency)}</dd></div>
+      <div><dt>Future recurring spend</dt><dd>{formatCurrency(r.currentAnnualTotal - benefit, s.currency)}</dd></div>
+      <div className="ledger-net"><dt>{benefit > 0 ? 'Estimated annual reduction' : benefit < 0 ? 'Estimated annual increase' : 'Annual change'}</dt><dd>{formatCurrency(Math.abs(benefit), s.currency)}</dd></div></dl>
+    <small>Based on entered items and eligible assumptions. Unreviewed spend is not zero.</small>
+    <button onClick={() => s.setStep('assumptions')}>Review what is counted →</button>
+  </div>;
 }
 
-export function StepContainer({ children }: { children: ReactNode }) {
-  return <div className="mx-auto max-w-6xl px-4 py-10 sm:px-6">{children}</div>;
+export function CostRail() {
+  const s = useAssessment();
+  const reviewed = answeredCategoryCount(s.lines, s.dismissed);
+  return <aside className="cost-rail no-print" aria-label="Persistent cost summary"><Ledger /><div className="rail-note"><strong>{reviewed} of {CATEGORIES.length} spend categories answered</strong><p>You can continue with a partial inventory. Your business case will stay marked provisional.</p><ProgressBar value={reviewed} max={CATEGORIES.length} /></div><div className="rail-note"><strong>Full replacement scenario</strong><p>Covered invoices are modeled as fully replaced. Not-covered services stay paid. Add cancellation delays and transition costs in Review.</p></div></aside>;
 }
+
+export function MobileSummary() {
+  const s = useAssessment();
+  const r = computeAssessment(toAssessment(s));
+  return <details className="mobile-summary no-print"><summary>Working estimate · {formatCurrency(Math.abs(r.netAnnualConservative), s.currency)} annual {r.netAnnualConservative >= 0 ? 'reduction' : 'increase'}</summary><Ledger /></details>;
+}
+
+export function StepFooter({ onNext, nextLabel = 'Continue', nextDisabled, children }: { onNext?: () => void; nextLabel?: string; nextDisabled?: boolean; children?: ReactNode }) {
+  const s = useAssessment();
+  const current = STAGES.findIndex(x => x.id === (s.step === 'catalog' ? 'quick' : s.step));
+  return <div className="step-footer no-print"><div>{current > 0 && <Button variant="ghost" onClick={() => s.setStep(STAGES[current - 1].id)}><ArrowLeft />Back</Button>}</div><div className="button-row">{children}<Button disabled={nextDisabled} onClick={onNext ?? (() => s.setStep(STAGES[Math.min(current + 1, STAGES.length - 1)].id))}>{nextLabel}<ArrowRight /></Button></div></div>;
+}
+
+export function StepContainer({ children }: { children: ReactNode }) { return <>{children}</>; }

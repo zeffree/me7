@@ -14,18 +14,22 @@
     "deploy": "npm run build && powershell -NoProfile -ExecutionPolicy Bypass -File scripts/deploy.ps1"
   },
   "dependencies": {
+    "@react-three/drei": "^10.7.8",
+    "@react-three/fiber": "^9.7.0",
     "framer-motion": "^12.23.12",
     "lucide-react": "^0.544.0",
     "lz-string": "^1.5.0",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
     "recharts": "^3.10.1",
+    "three": "^0.185.1",
     "zustand": "^5.0.8"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.1.13",
     "@types/react": "^19.1.13",
     "@types/react-dom": "^19.1.9",
+    "@types/three": "^0.185.4",
     "@vitejs/plugin-react": "^5.0.2",
     "tailwindcss": "^4.1.13",
     "typescript": "^5.9.2",

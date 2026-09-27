@@ -4,56 +4,78 @@ import type { TeiBenefitLine, TeiStudyId } from '@/data/teiStudies';
 
 /** How a spend figure was entered. */
 export type SpendMode = 'pupm' | 'annual';
+export type AmountSource = 'customer' | 'benchmark' | 'legacy';
+export type PriceSource = 'customer' | 'reference' | 'legacy';
+
+export interface LineAssumptions {
+  /** Whole months without retirement savings; zero starts savings in month one. */
+  savingsDelayMonths?: number;
+  amountSource?: AmountSource;
+  /** @deprecated Audit-only legacy confirmation; never gates retirement or proves entitlement. */
+  assumptionConfirmed?: boolean;
+}
 
 /** A third-party product the customer pays for today. */
-export interface SpendLine {
+export interface SpendLine extends LineAssumptions {
   categoryId: string;
   vendor: string;
   /** Seats for this product. Falls back to the org-wide seat count when unset. */
   seats?: number;
   mode: SpendMode;
-  /** USD per user per month, when mode is 'pupm'. */
+  /** Assessment currency per user per month, when mode is 'pupm'. */
   pupm?: number;
-  /** USD annual total, when mode is 'annual'. */
+  /** Assessment currency annual total, when mode is 'annual'. */
   annual?: number;
   /** ISO date. Purely informational today, but surfaced so renewal timing is visible. */
   contractEnd?: string;
-  /** 0-100. Portion of this spend the customer expects to keep even after consolidating. */
+  /** @deprecated Audit-only legacy retained percentage; covered USD invoices assume full replacement. */
   retainPct: number;
 }
 
 /** A Microsoft add-on SKU the customer pays for today. */
-export interface AddOnLine {
+export interface AddOnLine extends LineAssumptions {
   addOnId: string;
   seats?: number;
   mode: SpendMode;
   pupm?: number;
   annual?: number;
+  /** @deprecated Audit-only legacy retained percentage; absorbed USD add-ons assume full replacement. */
+  retainPct?: number;
 }
 
 export interface Assumptions {
-  /** E7 list price per user per month. */
+  transitionEnabled?: boolean;
+  transitionCost?: number;
+  baselinePriceSource?: PriceSource;
+  e7PriceSource?: PriceSource;
+  /** @deprecated Audit-only legacy confirmation; never gates a usable USD cash estimate. */
+  pricesConfirmed?: boolean;
+  /** E7 comparison unit price in assessment currency; references retain USD provenance. */
   e7ListPupm: number;
   /** Negotiated discount off E7 list, as a percentage. */
   e7DiscountPct: number;
   /** What the customer actually pays today for their baseline suite, per user per month. */
   baselineUnitPupm: number;
   horizonYears: number;
+  /** @deprecated Retained for v1 reading; not applied. Use transitionCost. */
   migrationCostPerSeat: number;
-  /** Share of consolidation savings realised in year one, since contracts run to renewal. */
+  /** @deprecated Not applied. Use explicit savingsDelayMonths on individual invoices. */
   year1RealizationPct: number;
-  /** Credit applied per confidence tier in the conservative case. */
+  /** @deprecated Neutral legacy fields; invoice credit is never confidence-discounted. */
   conservative: Record<Confidence, number>;
-  /** Credit applied per confidence tier in the best case. */
+  /** @deprecated Neutral legacy fields; aliases produce the same credited retirement. */
   bestCase: Record<Confidence, number>;
 }
 
 /**
- * Settings for the experimental TEI simulation. Kept off by default: everything else in this app
- * multiplies numbers the customer typed in themselves, whereas this re-scales somebody else's
+ * Settings for the experimental TEI simulation. Kept off by default: the cash model uses the
+ * assessment's explicit invoice and price inputs, whereas this re-scales somebody else's
  * composite organisation onto them. That is a weaker claim and the UI treats it as one.
  */
 export interface TeiSettings {
+  combinedReviewed?: boolean;
+  /** Explicit review of the exact published training cost omitted from a combination. */
+  enablementOverlapReviewed?: boolean;
   /** The user has explicitly opted in to running the simulation. */
   enabled: boolean;
   /**
@@ -74,6 +96,10 @@ export interface TeiSettings {
 }
 
 export interface Assessment {
+  schemaVersion?: 2;
+  reviewWarnings?: string[];
+  addOnsReviewed?: boolean;
+  isDemo?: boolean;
   orgName: string;
   seats: number;
   currency: string;
@@ -95,17 +121,22 @@ export interface Assessment {
  * Which story a line tells.
  *  already-redundant — the customer's CURRENT suite already covers this; they pay twice today
  *  unlocked-by-e7    — moving to E7 newly covers it
- *  partial-upgrade   — they have a lesser tier today and E7 raises it; scored conservatively
+ *  partial-upgrade   — they have a lesser tier today and E7 raises it; full replacement assumed
  *  not-covered       — E7 does not cover this at all; zero credit
  */
 export type Bucket = 'already-redundant' | 'unlocked-by-e7' | 'partial-upgrade' | 'not-covered';
 
 export interface ScoredLine {
+  eligible: boolean;
+  /** @deprecated Always false. Eligibility models a scenario, not customer verification. */
+  requiresConfirmation: boolean;
+  exclusionReason?: string;
+  annualCredit: number;
   line: SpendLine;
   category: Category;
   coverage: Coverage;
   bucket: Bucket;
-  /** Confidence actually used — 'upgrade' coverage is floored to 'partial'. */
+  /** Descriptive evidence label only — never a multiplier on invoice credit. */
   effectiveConfidence: Confidence;
   annualSpend: number;
   conservativeCredit: number;
@@ -113,6 +144,12 @@ export interface ScoredLine {
 }
 
 export interface ScoredAddOn {
+  line: AddOnLine;
+  eligible: boolean;
+  /** @deprecated Always false. Resolve duplicate/bundled entries by removing them, not confirming. */
+  requiresConfirmation: boolean;
+  exclusionReason?: string;
+  annualCredit: number;
   addOnId: string;
   name: string;
   annualSpend: number;
@@ -143,6 +180,27 @@ export interface TcoYear {
   cumulativeNetBenefit: number;
 }
 
+export interface CashflowMonth {
+  /** Month zero contains only the optional transition investment. */
+  month: number;
+  currentCost: number;
+  e7Cost: number;
+  vendorSavings: number;
+  addOnSavings: number;
+  cashSavings: number;
+  licenceUplift: number;
+  transitionCost: number;
+  netBenefit: number;
+  cumulativeNetBenefit: number;
+}
+
+export type PaybackStatus =
+  | 'reached'
+  | 'not-reached'
+  | 'no-investment'
+  | 'break-even'
+  | 'cost-increase';
+
 /**
  * A capability the customer has no spend against today, which E7 either newly unlocks or raises
  * to a usable tier. If they wanted it, they would have to buy it — so switching it on avoids a
@@ -150,6 +208,7 @@ export interface TcoYear {
  * because by definition there is no customer figure.
  */
 export interface AvoidedCost {
+  currency: 'USD';
   category: Category;
   coverage: Coverage;
   /** Catalog benchmark, per user per month, for the third-party products in this category. */
@@ -165,6 +224,18 @@ export interface AvoidedCost {
 }
 
 export interface EngineResult {
+  futureAnnualTotal: number;
+  recurringAnnualBenefit: number;
+  totalAnnualSavings: number;
+  year1NetBenefit: number;
+  monthlyCashflow: CashflowMonth[];
+  paybackStatus: PaybackStatus;
+  warnings: string[];
+  /** Usable USD cash inputs with no unknown amounts, identities or ambiguous duplicate/bundle credit. */
+  cashEstimateReady: boolean;
+  /** @deprecated Exact alias of cashEstimateReady; does not represent human confirmation. */
+  cashEstimateConfirmed: boolean;
+  referenceCurrency: 'USD';
   seats: number;
   // ---- current state
   baselineAnnual: number;
@@ -193,7 +264,7 @@ export interface EngineResult {
   // ---- headline
   netAnnualConservative: number;
   netAnnualBest: number;
-  /** What E7 really costs per user per month once redundant spend is cancelled. */
+  /** Offset-adjusted comparison, not the Microsoft invoice rate or a refund. */
   effectiveNetPupmConservative: number;
   effectiveNetPupmBest: number;
   migrationTotal: number;
@@ -231,6 +302,8 @@ export interface TeiScoredLine {
 }
 
 export interface TeiStudySummary {
+  byYear: number[];
+  total: number;
   studyId: TeiStudyId;
   /** False when the customer's baseline already includes this study's value. */
   applies: boolean;
@@ -258,7 +331,11 @@ export interface TeiYear {
  * existing TCO, and keeping it in its own shape makes that difficult to do by accident.
  */
 export interface TeiResult {
-  /** False when the user has not opted in. Everything below is zeroed in that case. */
+  canCombine: boolean;
+  paybackStatus: PaybackStatus | 'withheld';
+  combinationWarnings: string[];
+  referenceCurrency: 'USD';
+  /** False when the user has not opted in; all simulated financial values are withheld. */
   enabled: boolean;
   seats: number;
   copilotSeats: number;
@@ -273,7 +350,7 @@ export interface TeiResult {
   /** teiBenefitPv + cashBenefitPv. */
   totalBenefitPv: number;
   costPv: number;
-  npv: number;
+  npv: number | null;
   /** Null when costs are zero, since ROI would be meaningless. */
   roiPct: number | null;
   paybackMonths: number | null;

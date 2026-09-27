@@ -17,11 +17,13 @@ export function ImportButton({
   size = 'sm',
   label = 'Load saved JSON',
   className,
+  onImported,
 }: {
   variant?: 'primary' | 'secondary' | 'ghost';
   size?: 'sm' | 'md';
   label?: string;
   className?: string;
+  onImported?: () => void;
 }) {
   const hydrate = useAssessment((s) => s.hydrate);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -45,7 +47,9 @@ export function ImportButton({
     // Success unmounts this button — hydrate jumps to the results step — so the confirmation
     // travels with it and is shown where the user actually lands.
     const summary = describeImport(result.assessment);
+    if (useAssessment.getState().started && !window.confirm('Restore this file and replace the current assessment? Export your current work first if you need to keep it.')) return;
     hydrate(result.assessment, result.warning ? `${summary} ${result.warning}` : summary);
+    onImported?.();
   };
 
   return (

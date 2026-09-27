@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { CATEGORIES } from './categories';
 import { MS_ADD_ONS } from './msAddOns';
 import { BASELINE_SKUS, E7_SKU, PACKAGING_UPDATE, getBaseline } from './skus';
+import { getAddOnPriceEvidence, getBenchmarkEvidence } from './evidence';
 
 /**
  * Guards the July 2026 Microsoft 365 packaging update.
@@ -145,13 +146,13 @@ describe('September 2026 fact audit — corrections that must not regress', () =
    * July 2026 pushed Intune Plan 2, Remote Help and Advanced Analytics into M365 E3 and
    * EPM, Cloud PKI and Enterprise Application Management into M365 E5 — between them the
    * Intune Suite capability set. The data used to call this "an add-on even for E5 and E7
-   * customers", which hid a live double-spend from exactly the customers who have it.
+   * customers", which hid a potential overlap requiring customer review.
    */
   it('treats the Intune Suite as absorbed, because E5 now carries its capabilities', () => {
     expect(addOn('intune-suite').absorbedByE7).toBe(true);
   });
 
-  it('prices Teams Phone and Windows E3 at Microsoft list, not the pre-July figures', () => {
+  it('retains editable Teams Phone and Windows E3 reference seeds pending quote review', () => {
     expect(addOn('teams-phone').listPricePupm).toBe(10);
     expect(addOn('windows-e3').listPricePupm).toBe(7.63);
   });
@@ -170,7 +171,7 @@ describe('September 2026 fact audit — corrections that must not regress', () =
     expect(names.some((n) => n.includes('work iq'))).toBe(false);
   });
 
-  it('drops "Cowork", which has no Microsoft source', () => {
+  it('does not count a preview experience as a separate E7 suite component', () => {
     const all = JSON.stringify(BASELINE_SKUS) + JSON.stringify(E7_SKU);
     expect(all.toLowerCase()).not.toMatch(/cowork/);
   });
@@ -251,19 +252,15 @@ describe('Power Platform, RPA and Copilot Studio — no tier ladder', () => {
 /**
  * Guards the catalog's pricing semantics.
  *
- * `benchmarkPupm` is the list price of the THIRD-PARTY products in a category — what a customer
- * pays Tableau or DocuSign today. It is deliberately not the price of the Microsoft component
- * that replaces them. A user reported Power BI Pro "showing as $15" when $15 was in fact the
- * Tableau Viewer seat price sitting on the same card, so these tests pin the corrected figures
- * and guard the class of error where a benchmark drifts onto the Microsoft price instead.
+ * Benchmark seeds represent illustrative alternatives, not verified vendor or Microsoft prices.
+ * Numeric regression checks preserve existing input defaults; they are not source verification.
  */
 describe('Category benchmarks price the alternatives, not the Microsoft component', () => {
   const byId = (id: string) => CATEGORIES.find((c) => c.id === id)!;
   const addOn = (id: string) => MS_ADD_ONS.find((a) => a.id === id)!;
 
   it('does not price business intelligence at the Power BI Pro seat price', () => {
-    // The reported bug. $15 was the Tableau *Viewer* floor; a real enterprise mix of
-    // Creator / Explorer / Viewer blends to roughly $25.
+    // Preserve separate illustrative inputs; this does not verify either vendor's price.
     expect(addOn('power-bi-pro').listPricePupm).toBe(14);
     expect(byId('business-intelligence').benchmarkPupm).toBe(25);
     expect(byId('business-intelligence').benchmarkPupm).not.toBe(
@@ -271,19 +268,21 @@ describe('Category benchmarks price the alternatives, not the Microsoft componen
     );
   });
 
-  it('prices specialist tools at their real per-seat list price', () => {
-    // Every one of these was below the cheapest published plan in its category.
-    expect(byId('esignature').benchmarkPupm).toBe(30); // DocuSign Standard $30 / Business Pro $45
-    expect(byId('forms-surveys').benchmarkPupm).toBe(25); // cheapest seat in category is ~$18
-    expect(byId('ai-notetaker').benchmarkPupm).toBe(19); // Otter Business $19.99 annual
-    expect(byId('windows-vdi').benchmarkPupm).toBe(14); // Citrix DaaS $10-20
+  it('preserves specialist reference seeds as explicitly unverified assumptions', () => {
+    expect(byId('esignature').benchmarkPupm).toBe(30);
+    expect(byId('forms-surveys').benchmarkPupm).toBe(25);
+    expect(byId('ai-notetaker').benchmarkPupm).toBe(19);
+    expect(byId('windows-vdi').benchmarkPupm).toBe(14);
+    for (const id of ['esignature', 'forms-surveys', 'ai-notetaker', 'windows-vdi']) {
+      expect(getBenchmarkEvidence(id).status).toBe('unverified');
+    }
   });
 
-  it('keeps Windows 365 on a real Cloud PC size', () => {
-    // $31 matched no published tier. Sizes are $28 / $41 / $66 / $123.
+  it('labels the Windows 365 seed as an unverified configuration-dependent reference', () => {
     expect(addOn('windows-365').listPricePupm).toBe(41);
     expect(addOn('windows-365').note).toContain('$41');
     expect(addOn('windows-365').note).not.toContain('$31');
+    expect(getAddOnPriceEvidence('windows-365').status).toBe('unverified');
   });
 
   it('leaves categories that are not sold per user at zero', () => {
@@ -294,7 +293,7 @@ describe('Category benchmarks price the alternatives, not the Microsoft componen
     }
   });
 
-  it('keeps every adoption rate a real share of the workforce', () => {
+  it('bounds every illustrative adoption assumption to a share of the workforce', () => {
     for (const c of CATEGORIES) {
       if (c.typicalAdoptionPct === undefined) continue;
       expect(c.typicalAdoptionPct).toBeGreaterThan(0);
@@ -302,35 +301,20 @@ describe('Category benchmarks price the alternatives, not the Microsoft componen
     }
   });
 
-  it('only discounts adoption for categories that are genuinely bought for a subset', () => {
-    // Endpoint protection, email security and SSO are bought for everyone. If one of these
-    // ever picks up an adoption rate, avoidance silently under-reports.
+  it('preserves the explicit population assumptions without certifying them', () => {
     for (const id of ['edr-xdr', 'email-security', 'sso-mfa', 'uem', 'dlp']) {
       expect(byId(id).typicalAdoptionPct).toBeUndefined();
     }
-    // ...while these are unambiguously specialist, and are priced per licensed seat.
     for (const id of ['esignature', 'forms-surveys', 'project-management', 'business-intelligence']) {
       expect(byId(id).typicalAdoptionPct).toBeLessThan(1);
     }
-    // These are priced per privileged user, per GB and per host, so the benchmark is already
-    // normalized across the workforce. An adoption rate here would discount twice.
+    // Legacy workforce-normalized seeds do not have an additional adoption factor.
     for (const id of ['pam-ciem', 'ediscovery', 'webinars-events']) {
       expect(byId(id).typicalAdoptionPct).toBeUndefined();
     }
   });
 
-  it('never lets a benchmark drift onto the Microsoft add-on price for the same capability', () => {
-    // The conflation that caused the original report, generalised. A category benchmark that
-    // exactly matches the Microsoft SKU shown on the same card is usually a copied number
-    // rather than a coincidence — that is precisely how business-intelligence ended up
-    // reading as "Power BI Pro costs $15". Verified coincidences are listed here with their
-    // evidence, so a genuine collision stays green while any new drift fails.
-    const verifiedCoincidence = new Map<string, string>([
-      // Cisco Duo lists $3 / $6 / $9 and Okta Starter $6, which honestly blend to ~$7.
-      // Entra ID P1 also happens to be $7. Independently sourced, not copied.
-      ['sso-mfa', 'entra-id-p1'],
-    ]);
-
+  it('keeps vendor benchmark provenance separate from Microsoft add-on references', () => {
     const pairs: [string, string][] = [
       ['business-intelligence', 'power-bi-pro'],
       ['genai-assistant', 'copilot'],
@@ -343,9 +327,9 @@ describe('Category benchmarks price the alternatives, not the Microsoft componen
       const ms = addOn(addOnId);
       expect(cat, categoryId).toBeDefined();
       expect(ms, addOnId).toBeDefined();
-      if (verifiedCoincidence.get(categoryId) === addOnId) continue;
-      expect(cat.benchmarkPupm, `${categoryId} benchmark must not equal ${addOnId} list price`)
-        .not.toBe(ms.listPricePupm);
+      expect(getBenchmarkEvidence(categoryId).sourceIds).toEqual(['catalog-assumptions']);
+      expect(getBenchmarkEvidence(categoryId).status).toBe('unverified');
+      expect(getAddOnPriceEvidence(addOnId).sourceIds).not.toContain('catalog-assumptions');
     }
   });
 });

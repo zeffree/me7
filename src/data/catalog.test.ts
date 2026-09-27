@@ -21,8 +21,8 @@ describe('catalog integrity', () => {
     expect(orphans).toEqual([]);
   });
 
-  it('gives every category at least three example products', () => {
-    const thin = CATEGORIES.filter((c) => c.examples.length < 3).map((c) => c.id);
+  it('gives every category at least four distinct example products', () => {
+    const thin = CATEGORIES.filter((c) => new Set(c.examples.map(example => example.trim().toLowerCase())).size < 4).map((c) => c.id);
     expect(thin).toEqual([]);
   });
 

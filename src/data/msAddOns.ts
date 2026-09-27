@@ -2,18 +2,18 @@
  * Microsoft add-on SKUs a customer may already be paying for on top of their
  * baseline suite.
  *
- * `absorbedByE7: true`  -> E7 includes this capability, so the add-on line can be retired.
+ * `absorbedByE7: true`  -> Candidate entitlement overlap; cancellation requires review.
  * `absorbedByE7: false` -> E7 does NOT include it. These are listed deliberately: a business
  *                          case that quietly assumes E7 swallows Sentinel, calling plans or
- *                          Security Copilot will not survive finance review.
+ *                          consumption allowances will not survive finance review.
  *
- * `relevantFor` gates which baselines would plausibly be buying the add-on — there is no point
- * asking an M365 E5 customer whether they buy Entra ID P2, because E5 already includes it.
+ * `relevantFor` is a discovery hint, not a reason to hide an entered invoice.
  *
- * Prices are USD list per user per month (annual commitment), and are editable in-app.
+ * Prices are editable USD reference inputs; see getAddOnPriceEvidence for review status.
  */
 
 import type { BaselineSkuId } from './skus';
+import { SECURITY_COPILOT_ALLOWANCE } from './sources';
 
 export interface MsAddOn {
   id: string;
@@ -21,14 +21,17 @@ export interface MsAddOn {
   listPricePupm: number;
   description: string;
   absorbedByE7: boolean;
+  /** Actual invoice cancellation requires customer review even when entitlement is sourced. */
+  requiresConfirmation?: boolean;
   relevantFor: BaselineSkuId[];
+  /** Categories with purchased capability overlap. Not proof of complete functional coverage. */
+  capabilityIds?: string[];
   /** Set for add-ons that are not per-user priced, so the UI can explain the estimate. */
   note?: string;
   /**
-   * Microsoft consolidated several standalone per-user SKUs into the Defender and Purview
-   * suites, and no longer publishes list prices for the originals. Customers on older
-   * agreements may still see them itemised, so they stay selectable — but counting a suite
-   * AND its constituents is double-counting, and the UI warns when both carry a value.
+   * Potential suite/component overlap for legacy standalone invoices. Current availability
+   * and prices require agreement review. A suite and a constituent can be distinct invoices
+   * for different populations; review their allocation rather than assuming duplication.
    */
   supersededBy?: string;
 }
@@ -36,14 +39,49 @@ export interface MsAddOn {
 const ALL: BaselineSkuId[] = ['o365e3', 'm365e3', 'm365e5'];
 const E3_TIERS: BaselineSkuId[] = ['o365e3', 'm365e3'];
 
-export const MS_ADD_ONS: MsAddOn[] = [
+/** Conservative planned-capability overlap: partial purchases also require review, not full new value. */
+export const ADD_ON_CAPABILITY_IDS: Record<string, string[]> = {
+  'copilot': ['genai-assistant', 'enterprise-search', 'ai-notetaker', 'agent-platform'],
+  'agent-365': ['agent-governance'],
+  'intune-suite': ['uem', 'remote-support', 'dex', 'patch-config', 'pam-ciem', 'cert-lifecycle'],
+  'entra-suite': ['sso-mfa', 'identity-governance', 'pam-ciem', 'ztna', 'swg', 'verified-id'],
+  'entra-id-governance': ['identity-governance', 'pam-ciem'],
+  'entra-id-p1': ['sso-mfa'],
+  'entra-id-p2': ['sso-mfa', 'identity-governance', 'pam-ciem'],
+  'windows-e3': ['windows-vdi'],
+  'intune-plan1': ['uem', 'patch-config'],
+  'defender-endpoint-p1': ['edr-xdr'],
+  'defender-endpoint-p2': ['edr-xdr', 'mobile-threat-defense', 'vuln-mgmt'],
+  'defender-o365-p1': ['email-security'],
+  'defender-o365-p2': ['email-security', 'security-awareness'],
+  'defender-identity': ['itdr'],
+  'defender-cloud-apps': ['casb', 'genai-data-protection'],
+  'm365-e5-security': ['edr-xdr', 'mobile-threat-defense', 'email-security', 'security-awareness', 'itdr', 'casb', 'vuln-mgmt', 'sso-mfa', 'pam-ciem'],
+  'm365-e5-compliance': ['dlp', 'info-protection', 'insider-risk', 'ediscovery', 'archiving-retention', 'comms-compliance', 'compliance-posture', 'genai-data-protection'],
+  'purview-info-protection': ['dlp', 'info-protection', 'archiving-retention'],
+  'purview-insider-risk': ['insider-risk'],
+  'purview-ediscovery-audit': ['ediscovery'],
+  'purview-comms-compliance': ['comms-compliance'],
+  'power-bi-pro': ['business-intelligence'],
+  'teams-phone': ['ucaas-telephony'],
+  'audio-conferencing': ['audio-conferencing'],
+  'sentinel': ['siem-soar'],
+  'security-copilot': ['secops-ai'],
+  'teams-calling-plan': ['ucaas-telephony'],
+  'power-platform-premium': ['workflow-automation', 'lowcode', 'rpa'],
+  'project-plan3': ['project-management'],
+  'viva-suite': ['intranet-ex'],
+  'windows-365': ['windows-vdi'],
+};
+
+const ADD_ON_RECORDS: MsAddOn[] = [
   // ---------------------------------------------------------------- absorbed by E7
   {
     id: 'copilot',
     name: 'Microsoft 365 Copilot',
     listPricePupm: 30,
     description:
-      'The AI assistant across Word, Excel, PowerPoint, Outlook and Teams. E7 includes it for every user, so this add-on line disappears entirely.',
+      'The AI assistant across Word, Excel, PowerPoint, Outlook and Teams. E7 includes Copilot; review the same-user entitlement, contract and cancellation date before retiring an existing add-on invoice.',
     absorbedByE7: true,
     relevantFor: ALL,
   },
@@ -55,14 +93,14 @@ export const MS_ADD_ONS: MsAddOn[] = [
       'The control plane for AI agents — registry, Entra Agent ID, policy, observability, and Defender and Purview coverage for agents. Included with E7; $15/user/month standalone otherwise.',
     absorbedByE7: true,
     relevantFor: ALL,
-    note: 'Licensed per person who manages, sponsors or is served by agents — not per agent.',
+    note: 'Published as a per-user offer, not per agent. Validate the precise licensed population and prerequisites in the current agreement.',
   },
   {
     id: 'intune-suite',
     name: 'Microsoft Intune Suite',
     listPricePupm: 10,
     description:
-      'Remote Help, Endpoint Privilege Management, Cloud PKI, Enterprise Application Management and Advanced Analytics. The July 2026 update moved Intune Plan 2, Remote Help and Advanced Analytics into M365 E3, and EPM, Cloud PKI and Enterprise Application Management into M365 E5 — so an E5 customer still buying this suite is largely paying twice today.',
+      'Remote Help, Endpoint Privilege Management, Cloud PKI, Enterprise Application Management and Advanced Analytics. The 2026 update moves these capabilities into M365 E3/E5 at different tiers. Verify the component set, tenant rollout, user population and agreement before treating any existing invoice as redundant.',
     absorbedByE7: true,
     relevantFor: ALL,
   },
@@ -180,7 +218,7 @@ export const MS_ADD_ONS: MsAddOn[] = [
     name: 'Microsoft Defender Suite',
     listPricePupm: 12,
     description:
-      'The bundled Defender + Entra ID P2 uplift sold on top of M365 E3 — renamed from "Microsoft 365 E5 Security". Fully absorbed by E7.',
+      'The Defender + Entra ID P2 uplift associated with M365 E3. E7 includes relevant capabilities; validate the exact purchased Defender/E5 Security offer, users and cancellation terms.',
     absorbedByE7: true,
     relevantFor: ['m365e3'],
   },
@@ -189,7 +227,7 @@ export const MS_ADD_ONS: MsAddOn[] = [
     name: 'Microsoft Purview Suite',
     listPricePupm: 12,
     description:
-      'The bundled Purview uplift sold on top of M365 E3 — renamed from "Microsoft 365 E5 Compliance". Fully absorbed by E7.',
+      'The user-licensed Purview uplift associated with M365 E3. Validate the exact purchased Purview/E5 Compliance offer, users and cancellation terms; separately metered services may remain.',
     absorbedByE7: true,
     relevantFor: ['m365e3'],
   },
@@ -255,10 +293,10 @@ export const MS_ADD_ONS: MsAddOn[] = [
     name: 'Teams Audio Conferencing',
     listPricePupm: 0,
     description:
-      'Dial-in numbers for Teams meetings. Since 2023 this has been included at no cost with every enterprise plan that carries Teams, so there should be nothing left to cancel.',
+      'Dial-in numbers for Teams meetings. Validate the purchased Teams variant, assigned licences and included regional allowances before changing an existing invoice.',
     absorbedByE7: true,
-    relevantFor: [],
-    note: 'Listed for completeness only. If this still appears on your invoice it is worth querying with your reseller — Microsoft made it free across enterprise plans.',
+    relevantFor: ALL,
+    note: 'A zero reference is not proof that your invoice is free or redundant. Toll-free, dial-out and regional consumption charges may remain.',
   },
 
   // ------------------------------------------------------------ NOT absorbed by E7
@@ -277,10 +315,10 @@ export const MS_ADD_ONS: MsAddOn[] = [
     name: 'Microsoft Security Copilot',
     listPricePupm: 0,
     description:
-      'AI for the SOC. Included for M365 E5 and E7 customers as a monthly Security Compute Unit allocation, so an E3-based customer paying for it separately can stop.',
+      `AI for the SOC. ${SECURITY_COPILOT_ALLOWANCE.summary}`,
     absorbedByE7: true,
-    relevantFor: E3_TIERS,
-    note: 'E5/E7 include 400 SCUs per month for every 1,000 paid licences, capped at 10,000 SCUs per month. Heavy SOC usage beyond that allocation is still billed, so treat this as a capped rather than unlimited saving.',
+    relevantFor: ALL,
+    note: SECURITY_COPILOT_ALLOWANCE.conditions,
   },
   {
     id: 'teams-calling-plan',
@@ -304,7 +342,7 @@ export const MS_ADD_ONS: MsAddOn[] = [
     id: 'project-plan3',
     name: 'Planner and Project Plan 3',
     listPricePupm: 30,
-    description: 'Full project and portfolio management. Sold separately from every M365 suite.',
+    description:     'Premium project planning capabilities. This is a separate purchase; verify current SKU features rather than treating it as a full portfolio-management entitlement.',
     absorbedByE7: false,
     relevantFor: ALL,
   },
@@ -324,9 +362,19 @@ export const MS_ADD_ONS: MsAddOn[] = [
     description: 'Hosted Cloud PCs. Consumption of compute, entirely separate from the E7 suite.',
     absorbedByE7: false,
     relevantFor: ALL,
-    note: 'Priced per Cloud PC size. $41 is the 2 vCPU / 8 GB / 128 GB config most orgs deploy for Office and line-of-business apps; sizes run $28 (2/4/128) to $123 (8/32/512), so adjust to your actual mix.',
+    note: 'Priced per Cloud PC configuration, not per employee. The stored $41 USD is an unverified illustrative reference; enter your actual configuration, commercial offer and invoice amount.',
   },
 ];
+
+export const MS_ADD_ONS: MsAddOn[] = ADD_ON_RECORDS.map((addOn) => ({
+  requiresConfirmation: true,
+  ...addOn,
+  capabilityIds: [...ADD_ON_CAPABILITY_IDS[addOn.id]],
+}));
+
+export function getAddOnCapabilityIds(addOnId: string): string[] {
+  return [...(getAddOn(addOnId)?.capabilityIds ?? [])];
+}
 
 export function addOnsForBaseline(baseline: BaselineSkuId): MsAddOn[] {
   return MS_ADD_ONS.filter((a) => a.relevantFor.includes(baseline));

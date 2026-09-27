@@ -1,22 +1,24 @@
-# Microsoft 365 E7 — Consolidation & Savings Assessment
+# Microsoft 365 E7 — Cost & Consolidation Assessment
 
 A browser-based tool that helps an organisation on **Office 365 E3**, **Microsoft 365 E3** or
 **Microsoft 365 E5** work out what a move to **Microsoft 365 E7** actually costs them, once you
 subtract the third-party and Microsoft add-on spend that E7 absorbs.
 
-The point is a single number:
+The primary comparison is:
 
-> **E7 lists at $99/user/month — here is what it nets to for you.**
+> **What do you spend today, what would you spend after the move, and when could savings begin?**
 
-Everything runs client-side. Spend figures are never uploaded anywhere.
+Calculations run client-side. New share links carry the assessment in the URL fragment rather than
+an HTTP query string. They are confidential links, not encrypted or access-controlled storage.
 
 ---
 
 ## Why this exists
 
-E7 gets argued on sticker price. But most organisations are already paying for identity, endpoint,
-security, compliance, telephony, BI and AI tooling that E7 either newly covers — or that their
-*current* suite already covered and they never cancelled.
+Sticker price alone is not a cost comparison. An organisation may already pay for identity,
+endpoint, security, compliance, telephony, BI and AI tooling that overlaps its current or proposed
+Microsoft suite. An overlapping entitlement is an opportunity to investigate, not proof that a
+vendor can be cancelled.
 
 Nobody has that number to hand, so the business case gets made badly.
 
@@ -27,16 +29,16 @@ already covers it. That splits the result into three honest buckets:
 
 | Bucket | Meaning | Who it hits hardest |
 | --- | --- | --- |
-| **Already redundant today** | Your current suite covers this and you still pay a vendor — you are double-paying *right now*, before E7 enters the picture | M365 E5 customers |
-| **Unlocked by E7** | The upgrade newly covers it | O365 E3 / M365 E3 customers |
+| **Existing-suite overlap** | Your current suite includes an overlapping capability; customer requirements and cancellable spend still need confirmation | M365 E5 customers |
+| **Unlocked by E7** | The upgrade adds an entitlement; technical suitability and contract timing still matter | O365 E3 / M365 E3 customers |
 | **Not covered by E7** | Sentinel, Teams calling plans, Microsoft 365 backup, password managers, e-signature, contact centre — scored at **zero** | Everyone |
 
 That third bucket is the reason the tool is worth using. A savings model that claims E7 replaces
 everything does not survive its first meeting with a CFO.
 
-Switching baseline demonstrates this cleanly: on the built-in demo, moving from E5 to O365 E3
-shifts 6 lines out of "already redundant" and into "unlocked" — while the total recoverable figure
-is unchanged. The bucketing is the narrative; the maths is the maths.
+Switching baseline changes both the licence comparison and the attribution of potential savings.
+The comparison is with the estate as entered, not with an independently optimized version of the
+current suite. Savings already achievable on today's suite are not an incremental E7 benefit.
 
 ---
 
@@ -55,7 +57,7 @@ npm run dev        # http://localhost:5173
 | `npm run build` | Typecheck (`tsc -b`) then production build to `dist/` |
 | `npm run preview` | Serve the built output locally |
 | `npm run typecheck` | Types only, no emit |
-| `npm test` | Vitest run (38 tests) |
+| `npm test` | Vitest run |
 | `npm run test:watch` | Vitest in watch mode |
 
 `vite.config.ts` sets `base: './'`, so `dist/` can be dropped onto any static host — GitHub Pages,
@@ -70,27 +72,71 @@ currentAnnual = seats × baselineUnitPrice × 12  +  Σ microsoftAddOns  +  Σ t
 e7Annual      = seats × e7Price × (1 − discount) × 12
 uplift        = e7Annual − (seats × baselineUnitPrice × 12)
 
-credit(line)  = annualSpend × confidenceFactor × (1 − retainPct)
-    conservative → full 100% | strong 70% | partial 35%
-    best case    → full 100% | strong 100% | partial 60%
+credit(line)  = full annual spend, if the invoice is eligible; otherwise 0
 
 netAnnual        = absorbedAddOns + thirdPartyCredit − uplift
-effectiveNetPupm = (e7Annual − totalSavings) / seats / 12      ← the headline
+futureAnnual     = currentAnnual − netAnnual
+effectiveNetPupm = (e7Annual − totalSavings) / seats / 12      ← an offset comparison, not an invoice
 ```
 
 Rules that keep it defensible, all unit-tested:
 
 - **`not-covered` categories earn zero credit** in both scenarios. Always.
-- **A tier upgrade is floored to `partial` confidence**, whatever the category claims — raising a
-  tier is rarely a like-for-like replacement.
-- **Year-one savings are throttled** by a realisation percentage (default 60%), because contracts
-  run to renewal. Microsoft add-ons are exempt: those stop the day E7 lands.
-- **Migration cost is applied once**, in year one.
+- **Model v3 assumes full replacement of eligible covered invoices.** No retained-spend percentage,
+  amount-confirmation checkbox or arbitrary confidence discount changes the credit. This is a
+  scenario assumption, not verified technical equivalence or an instruction to cancel contracts.
+- **Unknown amounts, unmapped invoices and unresolved duplicate/bundle allocations earn no
+  retirement credit.** Entered costs remain in the model until the allocation is resolved.
+- **Simple mode is a steady-state estimate.** Optional transition modeling uses customer-entered
+  costs and per-line savings delays, including Microsoft add-ons. A licence entitlement does not
+  automatically permit early contract cancellation.
+- **Transition cost is applied once**, at the start of the move and included in year-one TCO.
+- **Monthly cash flow drives timed results**, so first-year impact, TCO and payback use the same
+  realization schedule. Failure to reach payback within the selected horizon does not mean never.
 - The core identity `netAnnual ≡ currentAnnualTotal − futureAnnualTotal` is asserted in the tests,
   so the waterfall can never quietly stop reconciling.
 
-Every factor above is editable in the **Assumptions** step. A model a reviewer cannot stress-test
-is a model they will not sign.
+Prices and optional timing/cost assumptions can be edited. Legacy `retainPct`, `assumptionConfirmed`
+and `pricesConfirmed` inputs remain available in JSON/audit records but are not applied.
+`conservative`/`bestCase` aliases describe the same cash scenario. The financial model version is
+3; the editable input/export schema remains `me7-assessment/2`.
+
+### Currency and source evidence
+
+New assessments, imports and shared assessments must use **USD**. There is no currency selector
+or FX conversion. A previously saved non-USD assessment is preserved behind a recovery screen:
+download its original inputs or explicitly start a new USD assessment. Its figures are never
+silently relabeled or displayed as a new USD projection.
+
+Category benchmarks are app-set planning proxies, **not prices attributed to an example vendor**.
+Every illustrative amount explains that no single product supplied the price, names comparable
+products, and shows the USD unit amount, modeled user count and annual arithmetic. Replace it
+with an invoice or quote when available.
+
+The source registry distinguishes published facts, conditional entitlements and unverified
+estimates. It records review dates and limitations rather than using one global date as proof that
+every vendor-equivalence claim is established.
+
+Detailed sources, applicability, review statuses and current-assessment audit records live on the
+**Audit & review reference** page (`#audit`), linked from the footer rather than the assessment
+steps. It is an administrative reference, **not an authenticated or private area**. Customer-facing
+pages show full-replacement scenario labels without conditional/unverified coverage badges or
+amount-confirmation controls. The audit page preserves source status, amount provenance, ignored
+legacy fields and the exact current model policy; removal of a checkbox does not verify a source.
+
+### One worked example, from preview to assessment
+
+The landing and **Explore an example** use `src\data\demo.ts`, a single synthetic 1,000-seat
+Microsoft 365 E3 scenario. All displayed outcomes are calculated, not separately typed marketing
+numbers. At the default USD references and no E7 discount, it models $1,797,600 current recurring
+cost, $1,344,000 future recurring cost and a $453,600 annual reduction. It includes a $90,000
+transition budget and two months before retirement savings: year-one net benefit is $168,000,
+three-year net benefit is $1,075,200 and payback is month 8. SIEM, backup and e-signature remain
+paid. Product names illustrate the scenario; these synthetic amounts are not vendor quotes.
+
+Presenter mode connects the cost bridge, E7 capability map, largest invoice opportunities and
+cash-flow milestones to an owner-based evaluation plan. It explicitly distinguishes current-suite
+cleanup from an E7-only benefit and switches to an investment discussion when the case costs more.
 
 ---
 
@@ -101,33 +147,36 @@ A move to E7 bundles three things Forrester has separately measured: **Microsoft
 disappear". This optional panel answers the other half — the productivity, IT-efficiency and risk
 value those studies quantify — by re-scaling them to the customer's seat count.
 
-It is **off by default and opt-in**, badged experimental, dashed rather than solid, and kept out of
-net annual impact, effective per-user price and TCO. Every exported row is prefixed
-`EXPERIMENTAL — simulated TEI`.
+It is **off by default and opt-in**, labeled experimental, and kept out of net annual impact,
+effective per-user price and TCO. Study benefits are shown independently by default. A combined
+simulation requires explicit overlap review and compatible currencies; overlapping benefits,
+common cash savings and common costs must not be counted twice. Exported study rows retain their
+experimental label.
 
 ### The studies
 
-| Study | Date | Composite | Divisor | Benefits PV | ROI |
-|---|---|---|---|---|---|
-| [TEI of Microsoft 365 E5](https://www.microsoft.com/content/dam/microsoft/final/en-us/microsoft-brand/documents/Forrester-TEI-Of-Microsoft-365-E5.pdf) | Aug 2023 | 40,000 employees, 10,000 on E5, migrated from M365 E3 | 10,000 E5 seats | $68,842,937 | 190% |
-| [TEI of Microsoft 365 Copilot](https://tei.forrester.com/go/microsoft/M365Copilot/) | Mar 2025 | 25,000 employees; licensed 3,000 → 6,000 → 10,000 | that year's licensed seats | $36,771,858 | 116% |
-| [TEI of Microsoft Entra Suite](https://tei.forrester.com/go/Microsoft/EntraSuite/) | Jul 2025 | 85,000 users / 50,000 employees, 24,000 licensed | 85,000 users | $14,449,655 | 131% |
+| Study | Edition | Important qualification |
+|---|---|---|
+| [TEI of Microsoft 365 E5](https://www.microsoft.com/content/dam/microsoft/final/en-us/microsoft-brand/documents/Forrester-TEI-Of-Microsoft-365-E5.pdf) | Aug 2023 | Check the registry for table-level verification and normalization limitations. |
+| [TEI of Microsoft 365 Copilot](https://tei.forrester.com/go/microsoft/M365Copilot/) | Mar 2025 | The study licenses 3,000, 6,000, then 10,000 of 25,000 employees; its role mix and adoption pattern are not universal. |
+| [TEI of Microsoft Entra Suite](https://tei.forrester.com/go/Microsoft/EntraSuite/) | Jul 2025 | It distinguishes 85,000 users, 50,000 employees and 24,000 Suite licenses; a universal per-seat divisor is an app assumption. |
 
-All three discount at 10%/yr; all values used are the risk-adjusted ones.
+The simulation uses a 10% annual discount convention and stores the source benefit rows intended
+to be risk-adjusted. The August 2023 E5 figures are explicitly unverified and its benefit lines
+default off until the user deliberately selects an exploratory scenario.
 
 ### How the extrapolation works
 
-Each published line is divided by the seat population that earned it to give a **value per seat per
-study year**, then multiplied back up by this customer's seats. `src/data/teiStudies.ts` stores the
+Each published line is divided by a stated reference population to give a **modeled value per seat
+per study year**, then multiplied by this customer's seats. `src/data/teiStudies.ts` stores the
 **published figure and the divisor**, never a pre-divided rate — that is what lets the UI print its
 own arithmetic (`$1,755,000 ÷ 10,000 seats = $175.50/seat/yr`) so a reviewer can check any number
 against the study. Forrester's own year-by-year shape is preserved rather than averaged; years
 beyond the third hold at the year-three rate rather than extrapolating a trend nobody measured.
 
-`src/model/tei.test.ts` runs that division **backwards** — re-multiplying every stored line by its
-own composite seat count and asserting it reproduces the published year values and PV totals. If a
-figure is ever mistyped, those tests fail rather than the app quietly showing a confident wrong
-number.
+The TEI tests reconcile stored annual figures and financial identities. A division followed by
+multiplication verifies internal consistency, not the suitability of the divisor or the truth of
+the original input. Source review and explicitly labeled extrapolation assumptions are separate.
 
 ### What is deliberately not counted
 
@@ -137,20 +186,20 @@ number.
   The app already credits those savings from real invoices the customer entered; adding Forrester's
   estimate of the same saving would count it twice. They can be switched on, with the reason shown.
 - **E5 reduced travel** ships off as a COVID-era artifact pegged to a travel budget.
-- **The E5 study is excluded entirely for customers already on M365 E5** — that value is banked, not
-  gained.
-- **Copilot's organisation-level implementation cost** (~10 internal FTEs) is not modelled, because
-  the app already has its own migration-cost-per-seat input and stacking both would double-charge.
+- **The E5 study is excluded for customers already on M365 E5** rather than crediting an existing
+  entitlement as a new benefit. Existing Copilot/Entra purchases also require applicability review.
+- **Training is not the full implementation cost.** Any excluded study implementation or management
+  cost needs an explicit rationale. Merely having an optional transition-cost field does not
+  establish that the same cost was already entered.
 
 ### Two judgement calls worth knowing about
 
-- **Entra benefits are divided by 85,000 total users, not the 24,000 licensed.** Forrester derives
+- **The app normalizes Entra benefits over 85,000 total users, not the 24,000 licensed.** Forrester derives
   the benefit volumes at org-wide scale (80,000 password tickets/yr, 25,000 access tasks/yr) while
   licensing only a subset. Dividing by 24,000 would inflate the per-seat rate ~3.5×. The
-  conservative reading was taken.
-- **The Aug 2023 E5 study contradicts itself**: the exec summary prints $68.42M, the cash-flow table
-  prints $68,842,937. The table reconciles ($45,078,548 + $23,764,389) and the line items sum to it,
-  so the table is used.
+  normalization is still an application choice, not a Forrester-prescribed customer forecast.
+- **Combining studies can overlap benefits**, including help-desk, security administration, and
+  productivity effects. Reviewing invoice duplication alone does not resolve cross-study overlap.
 
 One more caution for anyone maintaining this: the widely-cited **"240% ROI Entra study" is not the
 Entra Suite**. It is a 2023 study of Azure AD + Permissions Management + Verified ID with a
@@ -166,6 +215,8 @@ scenario, not the March 2025 retrospective used here.
 src/
 ├─ data/
 │  ├─ skus.ts        baseline + E7 SKU definitions and list prices
+│  ├─ sources.ts     source documents, dates, price units and review status
+│  ├─ evidence.ts    per-claim conditions and customer-confirmation requirements
 │  ├─ msAddOns.ts    ~30 Microsoft add-ons, flagged absorbed / not absorbed
 │  ├─ teiStudies.ts  the three Forrester TEI studies, line by line, with divisors
 │  └─ categories.ts  54 categories × 7 domains — explanations, E7 mapping,
@@ -182,18 +233,55 @@ a benchmark price and its coverage against each of the three baselines.
 
 ## Features
 
-- **Quick scan** of the 9 highest-value categories, expanding to the full 54-category catalog
+- **Experience E7**: an independent, playable workplace comparing O365 E3 with E7 across eight
+  hands-on missions, with role paths, rewind, source-linked debriefs and the complete capability index
+- **Guided assessment** with quick capture and optional full-catalog exploration
 - Per-category explainers: what the solution class is, what replaces it, who the main vendors are,
   and a benchmark price for users who do not know their own numbers
-- Conservative ↔ best-case range on every figure
-- Waterfall from today's run-rate to the future run-rate, and a multi-year TCO chart
+- Explicit entered, estimated, unreviewed and excluded assumptions
+- Current/future recurring comparison, invoice-level reconciliation, and optional timed multi-year cash flow
 - Live sensitivity slider on the negotiated E7 discount
 - **Seller mode** — per-category talk tracks and a presenter brief, off by default
 - **Simulated Forrester TEI** — three published studies re-scaled to your seats, opt-in and badged
   experimental, with the full per-line derivation on the page
-- Export to JSON, CSV, or a print-friendly business case (three A4 pages, no card split across a fold) — and load a saved JSON file back in from step 1 to resume an assessment
-- Share links that carry the whole assessment compressed in the URL — still no server
+- Export to versioned JSON, CSV, or a print-friendly business case; restore saved assessments
+- Share links that carry the assessment compressed in the URL fragment; legacy query links remain readable
 - Light and dark themes; keyboard accessible; responsive
+
+---
+
+## Experience E7: try the difference
+
+Open **Experience E7** in the navigation or go directly to `#experience`. No assessment, account,
+tenant connection or live AI is needed. The fictional Northstar workplace contains a project-brief
+desk, device bench, access gate, incident room, information room, agent workshop, insights wall and
+meeting space. These are interactive illustrations, not replicas of Microsoft product interfaces.
+
+Choose a role or enter any space. Manipulate the sample artifacts, try the setup, switch between
+**Office 365 E3** and **Microsoft 365 E7**, and rewind your decisions. Each suite keeps its own run;
+changing the common sample case restarts both runs explicitly. Debriefs explain what E3 already
+offers, the specific E7 addition, configuration prerequisites and things that remain separate.
+Some manual E3 workflows succeed, and missing setup or permissions can still stop an E7 workflow.
+
+The capability index derives from the same catalog as the assessment, including not-covered
+categories. It is complete relative to this app, not an exhaustive Microsoft licensing document.
+Prepared Copilot outputs and all workplace data are synthetic. There are no claimed time savings,
+risk scores or financial credits from playing a mission. Astra is a development tool here, not a
+visitor-facing service or a claimed E7 entitlement.
+
+Lab state is separately versioned and stored through `src\store\experienceProgress.ts`.
+Corrupt, incompatible or unavailable storage produces an explicit recovery message; unreadable
+saved progress is not overwritten without a lab-only reset. No lab action loads the financial
+example, changes an invoice, changes the assessment baseline or starts an assessment.
+
+The route and activity components are lazy-loaded. The workplace uses semantic HTML with
+supporting SVG/CSS illustration rather than loading the technical map's Three.js renderer.
+Keyboard, touch and reduced-motion operation remain available. Optional external source links
+are for reference; playing the activities does not make a model, tenant or telemetry request.
+
+Implementation lives in `src\components\experience`, `src\data\experience` and the
+`experience*` engine/evaluation modules under `src\lib`. Exact `#experience` and
+`#experience-main-content` anchors are distinct from assessment share fragments.
 
 ---
 
@@ -201,15 +289,16 @@ a benchmark price and its coverage against each of the three baselines.
 
 - **This is an estimator, not a quote.** It is not an official Microsoft pricing source and carries
   no warranty. Confirm anything that matters with your Microsoft account team or partner.
-- Seeded prices are **published list prices as of September 2026** and are date-stamped in the UI. Real
-  EA/CSP agreements typically land 10–20% below list. Every price is editable.
-- Benchmark prices for third-party products are *indicative*, gathered to help users who do not
-  know their own spend. Enter your real numbers wherever you can.
+- Published prices carry their source date and purchasing conditions. Real EA/CSP prices depend on
+  the customer's agreement; no standard discount is promised. Enter actual contracted prices.
+- Benchmark prices are *illustrative category planning assumptions*, not independently retained
+  vendor-price evidence. Enter your real numbers wherever you can.
 - Coverage mappings are considered judgements, not Microsoft's official position. The most
   debatable calls carry an in-app caveat explaining the reasoning — for example, the Purview
-  Unified Catalog premium tier is consumption-billed, so data cataloguing is scored as a partial
-  tier upgrade rather than a replacement.
-- Currency is a display setting only. There is no FX conversion — enter amounts in one currency.
+  Unified Catalog premium tier is consumption-billed and is not treated as an included retirement
+  entitlement. Detailed scope limitations are retained in the audit reference.
+- There is no automatic FX conversion. New assessments use USD only; legacy currencies are
+  preserved for recovery, not reinterpreted.
 - **The simulated TEI is an extrapolation, not a Forrester finding.** Forrester has not studied
   Microsoft 365 E7, has not studied your organisation, and has not reviewed or endorsed this
   arithmetic. Three composite organisations are being re-scaled onto one customer who is none of
@@ -217,11 +306,17 @@ a benchmark price and its coverage against each of the three baselines.
 
 ## Privacy
 
-There is no backend, no analytics and no third-party network requests. State lives in
-`localStorage` under `me7-assessment`. Share links encode the assessment into the URL itself, so
-even sharing does not involve a server. **Anyone holding a share link can read the spend data
-inside it** — treat those links as confidential. The deployed site sends `Referrer-Policy:
-no-referrer` so a share link is not leaked in the `Referer` header of outbound clicks.
+There is no assessment backend or analytics. State lives in `localStorage` under `me7-assessment`.
+The capability lab has its own browser-storage key and stores only validated synthetic choices
+and discovery progress; resetting it does not clear the assessment.
+The static site is served by an HTTP host, but new shared payloads use `#d=...`, which browsers do
+not send in HTTP requests. **Anyone holding a share link can read the spend data inside it**:
+compression is not encryption, and the link has no access control or revocation.
+
+Older `?d=...` links remain readable, but their payload is sent to the host and may exist in
+hosting logs or browser history. Clearing the address after import does not erase those earlier
+copies. New links generated by the app remove the old query payload. Local exports and links
+should be handled as confidential financial documents.
 
 ## Deployment
 
@@ -263,8 +358,8 @@ security headers including a Content-Security-Policy.
 
 `server/server.mjs` is a zero-dependency Node server, so there is no install step on cold start. It
 reads the build into memory once at startup and precomputes gzip and Brotli for every compressible
-file, so requests never touch the disk. Brotli takes the main bundle from 527 KB to 141 KB — which
-Static Web Apps did automatically but a plain App Service does not. It also serves `ETag`/`304`,
+file, so requests never touch the disk. This provides compressed transfers on App Service without
+relying on the platform to compress responses. It also serves `ETag`/`304`,
 rejects non-GET/HEAD methods, and refuses to serve the hosting config files themselves.
 
 HTTPS redirection is handled by the App Service `httpsOnly` setting rather than a rewrite rule,

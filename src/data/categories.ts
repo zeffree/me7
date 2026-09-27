@@ -7,14 +7,14 @@
  * coverage differs depending on the suite the customer is on *today*.
  *
  * Coverage semantics (see model/engine.ts for how these are scored):
- *   'already'     Your CURRENT suite already covers this. If you still pay a vendor for it,
- *                 you are double-paying right now. This is the sharpest insight for E5 customers.
+ *   'already'     The baseline has a relevant capability; vendor replacement still needs review.
  *   'unlocked'    E7 newly covers this relative to your current suite.
- *   'upgrade'     You have a lesser tier of this today; E7 raises it. Scored conservatively.
+ *   'upgrade'     The baseline has a lesser tier. No automatic functional parity is implied.
  *   'not-covered' E7 does not cover this. Listed on purpose so the business case is honest.
  */
 
 import type { BaselineSkuId } from './skus';
+import { SECURITY_COPILOT_ALLOWANCE, TEAMS_VARIANT_CONDITION } from './sources';
 
 export type DomainId =
   | 'ai'
@@ -27,7 +27,7 @@ export type DomainId =
 
 export type Coverage = 'already' | 'unlocked' | 'upgrade' | 'not-covered';
 
-/** How completely the Microsoft capability displaces a mature incumbent deployment. */
+/** Legacy editorial coverage label, not verified parity or a financial discount. */
 export type Confidence = 'full' | 'strong' | 'partial';
 
 export interface Domain {
@@ -51,27 +51,23 @@ export interface Category {
   /** Mainstream products customers actually buy in this space. */
   examples: string[];
   /**
-   * Typical list price of the THIRD-PARTY products above, USD per user per month.
-   * This is what customers pay vendors like Tableau or CrowdStrike for this capability —
-   * it is deliberately NOT the price of the Microsoft component that replaces them.
-   * Used to help users size spend they don't have a number for, and to price cost avoidance.
-   * Where a category isn't sold per user (SIEM, contact centre), this is 0 and renders as "Varies".
+   * Illustrative, unverified USD benchmark for alternatives, not a published vendor quote.
+   * Some values normalize specialist or consumption pricing to workforce users.
+   * See getBenchmarkEvidence; using a seed applies the full-replacement scenario, not a quote.
+   * Zero means no reference estimate, not free service.
    */
   benchmarkPupm: number;
   /**
-   * Share of the workforce that typically holds a paid seat here, 0–1. Defaults to 1 (org-wide).
+   * Illustrative share of the workforce, 0–1. Not externally verified adoption data.
    *
-   * Only set this where `benchmarkPupm` is a genuine per-licensed-seat vendor list price — a
-   * DocuSign or Tableau seat. Several benchmarks in this catalog are instead already normalized
-   * across the whole workforce (PAM, eDiscovery and webinars are sold per privileged user, per
-   * GB and per host respectively, so there is no per-seat list price to quote). Setting an
-   * adoption rate on one of those would discount the same thing twice.
-   *
-   * Used ONLY to price cost avoidance, which would otherwise assume every employee needs a $30
-   * e-signature seat. Spend lines are unaffected — those carry their own seat count.
+   * The original catalog mixes licensed-seat inputs with workforce-normalized estimates.
+   * That normalization has no retained vendor derivation; review units and population before use.
+   * Used only for optional planned-capability estimates. Invoice lines carry their own seats.
    */
   typicalAdoptionPct?: number;
   confidence: Confidence;
+  /** Legacy evidence-review recommendation; not a model-v3 financial gate. */
+  requiresConfirmation?: boolean;
   /** Included in the 8-item quick assessment. */
   quickAssess: boolean;
   coverage: Record<BaselineSkuId, Coverage>;
@@ -143,7 +139,7 @@ const e5Already = cov('unlocked', 'unlocked', 'already');
 /** Included from M365 E3 upward — only O365 E3 customers gain it. */
 const e3Already = cov('unlocked', 'already', 'already');
 
-export const CATEGORIES: Category[] = [
+const CATEGORY_RECORDS: Category[] = [
   // ══════════════════════════════════════════════════════════ AI & AGENTS
   {
     id: 'genai-assistant',
@@ -166,9 +162,9 @@ export const CATEGORIES: Category[] = [
     quickAssess: true,
     coverage: allUnlocked,
     caveat:
-      'Teams doing heavy model experimentation or building on raw APIs will usually keep some direct model spend. Copilot replaces the seat-based assistant, not your Azure OpenAI or API consumption. Also note you already have Microsoft 365 Copilot Chat — a free, identity-authenticated web-grounded chat that the July 2026 packaging update extended with enhancements and usage analytics for E3. That is not a substitute for full Copilot (no Graph grounding, no in-app Word, Excel or Teams experiences), but it does mean the floor is not zero when you compare against a paid general-purpose assistant.',
+      'Direct model/API consumption and specialist workflows may remain. Eligible baseline users already have Copilot Chat, with 2026 enhancements; it is not the same entitlement as full Microsoft 365 Copilot. Verify current in-app and grounding capabilities rather than assuming the baseline has no AI.',
     talkTrack:
-      'This is normally the single largest line in the assessment. If they pay for ChatGPT Enterprise at ~$30 and E5 at $60, they are already at $90 — E7 at $99 buys the assistant plus Agent 365 plus the whole Entra Suite for $9 more.',
+      'Use the actual assistant invoice, not an assumed enterprise price. Compare only validated cancellable seats, and keep specialist workflows and API usage outside the retirement claim.',
   },
   {
     id: 'enterprise-search',
@@ -187,7 +183,7 @@ export const CATEGORIES: Category[] = [
     caveat:
       'Graph connectors need configuring per source, and some highly specialised connectors may not exist. Budget project effort for the migration.',
     talkTrack:
-      'Glean and Copilot land in the same budget conversation, but Glean is another $30 on top of a suite they already own. Ask what share of their searchable content already lives in Microsoft 365 — if it is most of it, they are paying twice for an index.',
+      'Ask which knowledge sources, permissions and workflows the current search tool serves. Microsoft 365 content overlap is a reason to evaluate, not proof that the search invoice is redundant.',
   },
   {
     id: 'ai-notetaker',
@@ -205,7 +201,7 @@ export const CATEGORIES: Category[] = [
     quickAssess: false,
     coverage: allUnlocked,
     talkTrack:
-      'Worth flagging the security angle, not just cost: third-party notetaker bots are an unmanaged data egress path out of your meetings.',
+      'Review recording consent, retention and data handling for both solutions. A third-party notetaker is not necessarily unmanaged, and a native tool still needs policy and configuration.',
   },
   {
     id: 'agent-platform',
@@ -229,9 +225,9 @@ export const CATEGORIES: Category[] = [
     quickAssess: false,
     coverage: allUnlocked,
     caveat:
-      'Copilot Studio is not itself bundled into E7 — its message capacity packs are billed separately from the seat, and Copilot Cowork is usage-billed in Copilot Credits rather than included outright. Complex customer-facing agents often stay on a specialist platform.',
+      'Copilot Studio capacity is not itself bundled as unlimited usage into E7. Confirm current capacity, agent and preview licensing rather than assuming all agent execution is included. Complex customer-facing agents may require separate platforms or consumption.',
     talkTrack:
-      'Do not oversell this one. Copilot Studio covers business-user agents well; it does not replace a developer team building on LangChain. Ask who builds their agents today — if it is IT and business analysts, this consolidates cleanly. If it is engineers, leave the line alone.',
+      'Ask who builds the agents, where they run and which integrations and consumption they require. A Copilot or Agent 365 entitlement is not evidence that a specialist development platform or its operating bill can be retired.',
   },
   {
     id: 'agent-governance',
@@ -248,9 +244,9 @@ export const CATEGORIES: Category[] = [
     quickAssess: false,
     coverage: allUnlocked,
     caveat:
-      'Agent 365 is not E7-exclusive — it is $15/user/month standalone on top of E5 or Defender + Purview Suite, and a free foundational tier covers agent inventory. The E7 saving is the bundling, not exclusive access.',
+      'Agent 365 is not E7-exclusive; the announcement also prices a standalone per-user offer at $15. Confirm current prerequisites, eligible users and any foundational tier rather than assuming every agent workload is covered.',
     talkTrack:
-      'For customers not yet spending here, do not book a saving — book it as risk avoided. Agent sprawl is the governance problem of 2026, and E7 bundles the control plane an E5 customer would pay $15 a seat for.',
+      'For customers not yet spending here, do not book cash savings or invent quantified risk avoided. Record a planned capability only if the customer intends to adopt it, with a separately confirmed budget assumption.',
   },
   {
     id: 'genai-data-protection',
@@ -291,11 +287,11 @@ export const CATEGORIES: Category[] = [
     benchmarkPupm: 7,
     confidence: 'strong',
     quickAssess: true,
-    coverage: e3Already,
+    coverage: cov('unlocked', 'upgrade', 'already'),
     caveat:
-      'Migrating an established IdP is a real project — app-by-app reconfiguration, and legacy on-prem apps may need Entra application proxy.',
+      'M365 E3 has Entra ID P1, not P2 risk-based Identity Protection. Migrating an established IdP needs app-by-app review, and customer identity or specialist integrations may remain separate.',
     talkTrack:
-      'M365 E3 and E5 customers running Okta alongside Entra are paying twice for the same capability today. This is usually the most uncomfortable — and most persuasive — line in the whole assessment.',
+      'Map the actual Okta or other identity workloads against the purchased Entra plan. Existing SSO overlap is not proof of equivalent integrations or a redundant invoice; validate the migration and retained scope.',
   },
   {
     id: 'identity-governance',
@@ -324,16 +320,16 @@ export const CATEGORIES: Category[] = [
       'Controlling admin and superuser access — time-bound elevation, approval workflows, and finding over-permissioned identities across cloud platforms.',
     e7Component: 'Microsoft Entra Privileged Identity Management + Intune Endpoint Privilege Management',
     whyReplaced:
-      'PIM provides just-in-time elevation, approval workflows and access reviews for privileged roles across Entra ID and Azure resources. Intune Endpoint Privilege Management covers the other half of most incumbent deployments — just-in-time local admin elevation on Windows endpoints with a full audit trail, which is precisely what CyberArk EPM and BeyondTrust Privilege Management are bought for.',
+      'PIM provides just-in-time elevation, approvals and access reviews for Entra ID and Azure roles. Intune Endpoint Privilege Management supports eligible Windows endpoint elevation. Neither establishes equivalence to a complete PAM or multicloud CIEM platform.',
     examples: ['CyberArk', 'BeyondTrust', 'Delinea', 'Sonrai Security', 'Saviynt CPAM'],
     benchmarkPupm: 6,
     confidence: 'partial',
     quickAssess: false,
     coverage: cov('unlocked', 'unlocked', 'already'),
     caveat:
-      'Covers PIM plus endpoint privilege elevation. Note the July 2026 packaging update moved Intune Endpoint Privilege Management into M365 E5, so E5 customers still paying a vendor for local admin elevation are double-paying today rather than waiting on E7. Multicloud CIEM is no longer part of this story — Entra Permissions Management was retired on 1 October 2025 and Microsoft now points to Defender for Cloud (CSPM), which is Azure consumption-billed and not in E7. Credential vaulting, session recording and privileged access for servers and OT remain uncovered.',
+      'The July 2026 packaging update adds endpoint privilege management to M365 E5; validate tenant enablement and supported scope. Entra Permissions Management retired on October 1, 2025, so no multicloud CIEM entitlement is claimed. Credential vaulting, session recording, servers and OT remain separate.',
     talkTrack:
-      'Split the incumbent before you price it. Vaulting and session recording stay; local admin elevation and role elevation go. Most CyberArk estates split the opposite way to what people assume, so ask for the module list rather than the contract total.',
+      'Split the incumbent by module and workload before pricing it. Vaulting, session recording and CIEM stay separate; validate role and endpoint elevation in a pilot before confirming any cancellable amount.',
   },
   {
     id: 'ztna',
@@ -466,7 +462,7 @@ export const CATEGORIES: Category[] = [
     caveat:
       'Mac-heavy estates with deep Jamf tooling often retain it. Intune is strongest on Windows and mobile.',
     talkTrack:
-      'Intune Plan 2 landing in E3 changed this conversation in July 2026. Tunnel for MAM and specialised device management were the two things Workspace ONE customers named to justify staying. Ask if those were the blockers — if so, the blocker is gone and they may already own the answer.',
+      'Review the updated M365 E3/E5 Intune entitlement against the actual device requirements and tenant enablement. A feature addition may remove a blocker, but only a validated migration and cancellation plan supports savings.',
   },
   {
     id: 'patch-config',
@@ -476,16 +472,16 @@ export const CATEGORIES: Category[] = [
       'Keeping operating systems and third-party applications up to date and configured to a hardened baseline, with reporting on compliance drift.',
     e7Component: 'Intune + Windows Autopatch + Enterprise Application Management',
     whyReplaced:
-      'Autopatch automates Windows, Office, Edge and Teams updates with ring-based rollout, Intune handles configuration baselines, and Enterprise Application Management adds a Microsoft-hosted Win32 app catalogue that packages and auto-updates common third-party applications.',
+      'Autopatch and Intune support Microsoft update and configuration workflows. Enterprise Application Management adds a hosted application catalog; validate each application and update workflow rather than assuming every third-party application auto-updates.',
     examples: ['Automox', 'Tanium', 'NinjaOne', 'Ivanti Neurons for Patch', 'PDQ Deploy'],
     benchmarkPupm: 5,
     confidence: 'strong',
     quickAssess: false,
-    coverage: e3Already,
+    coverage: cov('unlocked', 'upgrade', 'already'),
     caveat:
-      'Third-party application patching used to be the weak point here. The July 2026 packaging update put Intune Enterprise Application Management into M365 E5, which closes much of that gap for popular Win32 apps — but its catalogue is finite, so estates with a long tail of niche or in-house applications will still need packaging effort or a dedicated tool.',
+      'The July 2026 packaging update puts Enterprise Application Management in M365 E5, not E3. M365 E3 has foundational patching; validate app catalog coverage and update workflows. Niche and in-house applications may still need packaging effort or a dedicated tool.',
     talkTrack:
-      'Autopatch handles Microsoft’s own stack and Enterprise Application Management now covers the popular third-party apps. The honest question is how long their tail is. Fifteen common applications consolidates; two hundred bespoke ones does not.',
+      'Inventory every required application and update workflow. Enterprise Application Management is an E5 addition, and catalog availability alone is not proof of automatic patching or a cancellable third-party contract.',
   },
   {
     id: 'windows-vdi',
@@ -528,9 +524,9 @@ export const CATEGORIES: Category[] = [
     quickAssess: false,
     coverage: e3Already,
     caveat:
-      'New in the July 2026 packaging update: Remote Help moved into M365 E3 and E5, so if you still pay for a remote-control tool you are very likely double-paying today. It is scoped to internal, consent-based support of enrolled Windows, macOS and Android devices — external customer support, unattended access to servers, and iOS full control still need a dedicated product.',
+      'The July 2026 packaging update moves Remote Help into M365 E3 and E5. Validate tenant rollout, platform, enrolment and consent/unattended requirements. Existing support invoices may serve external customers or workloads that the included capability does not replace.',
     talkTrack:
-      'This is the fastest win in the assessment on E3 and E5 accounts. Remote Help arrived in July 2026 and nobody cancels a TeamViewer renewal they did not know had become redundant. Ask for the renewal date before you leave the room.',
+      'Ask which devices and support scenarios the invoice serves. Review the included Remote Help entitlement, run a pilot and record cancellation timing only for scope that the customer confirms can move.',
   },
   {
     id: 'dex',
@@ -553,9 +549,9 @@ export const CATEGORIES: Category[] = [
     quickAssess: false,
     coverage: e3Already,
     caveat:
-      'New in the July 2026 packaging update: Advanced Analytics is now in M365 E3 and E5. It genuinely displaces basic DEX reporting, but a mature Nexthink or Lakeside deployment also does real-time automated remediation, employee sentiment surveys and custom telemetry collection that Intune does not match — treat it as a partial replacement unless your use of the incumbent is reporting-led.',
+      'The July 2026 packaging update adds Advanced Analytics to M365 E3 and E5. Validate the required reporting, remediation, sentiment and telemetry features; no complete equivalence to a mature DEX deployment is established here.',
     talkTrack:
-      'Nexthink customers who bought it for dashboards will consolidate. Nexthink customers who built automated remediation on it will not. Ask which one they are before you put a number on the slide.',
+      'Separate reporting, remediation and employee-experience workflows before comparing products. Ask the customer to validate the supported scope and retained cost rather than predicting a full dashboard-platform cancellation.',
   },
   {
     id: 'mobile-threat-defense',
@@ -566,7 +562,7 @@ export const CATEGORIES: Category[] = [
     e7Component: 'Microsoft Defender for Endpoint (mobile)',
     whyReplaced:
       'Defender for Endpoint covers iOS and Android with app, network and web protection, and passes device risk into Intune compliance and Entra conditional access.',
-    examples: ['Lookout Mobile Endpoint Security', 'Zimperium', 'Check Point Harmony Mobile'],
+    examples: ['Lookout Mobile Endpoint Security', 'Zimperium', 'Check Point Harmony Mobile', 'Ivanti Neurons for Mobile Threat Defense'],
     benchmarkPupm: 3,
     confidence: 'strong',
     quickAssess: false,
@@ -595,11 +591,11 @@ export const CATEGORIES: Category[] = [
     benchmarkPupm: 9,
     confidence: 'strong',
     quickAssess: true,
-    coverage: e5Already,
+    coverage: cov('unlocked', 'upgrade', 'already'),
     caveat:
-      'M365 E3 already includes Defender for Endpoint P1 (next-gen antivirus and attack surface reduction), so part of an incumbent EDR line is redundant today rather than newly unlocked. Mature SOCs with deep CrowdStrike tooling and non-Windows server estates should pilot before switching. Server workloads are licensed via Defender for Servers, which is separate.',
+      'M365 E3 already includes Defender for Endpoint P1, but P1 is not P2 EDR. Existing antivirus overlap is not proof that an incumbent EDR invoice is redundant. Validate SOC workflows and server licences separately before switching.',
     talkTrack:
-      'E5 customers running CrowdStrike are the classic double-pay. The honest framing is not "rip it out tomorrow" but "you own an enterprise-grade EDR you are not using — why?"',
+      'An E5 licence provides a reason to evaluate Defender, not proof that CrowdStrike is redundant. Compare SOC workflows, server licensing and managed services before defining the retirement scope.',
   },
   {
     id: 'email-security',
@@ -622,7 +618,7 @@ export const CATEGORIES: Category[] = [
     quickAssess: true,
     coverage: cov('upgrade', 'upgrade', 'already'),
     caveat:
-      'Changed by the July 2026 packaging update: both E3 tiers now include Defender for Office 365 Plan 1, so E7 is a P1→P2 upgrade rather than net-new protection. The delta is automated investigation and response, Threat Explorer, attack simulation training and Threat Trackers — real SOC value, but the baseline filtering you would use to displace a Proofpoint or Mimecast is already in your suite today. Scored as a partial upgrade for that reason. Some organisations also deliberately keep a second, different-vendor mail filter for defence in depth; that is a valid architectural choice, not waste.',
+      'The July 2026 packaging update adds Defender for Office 365 P1 to both E3 tiers; E7 is a P1-to-P2 upgrade, not new baseline filtering. Validate response, investigation, simulation and retained gateway requirements. A second vendor can be an intentional defence-in-depth choice, not waste.',
     talkTrack:
       'The July 2026 change cuts both ways. E3 customers already hold Plan 1, so do not claim the full Proofpoint spend — but that also means they can act today rather than waiting for E7. Sell the audit now and the upgrade later.',
   },
@@ -669,7 +665,7 @@ export const CATEGORIES: Category[] = [
       'Continuously finding unpatched software and misconfigurations across your estate, and prioritising what to fix first based on real risk.',
     e7Component: 'Microsoft Defender Vulnerability Management',
     whyReplaced:
-      'Defender Vulnerability Management is built into Defender for Endpoint — agentless for enrolled devices, with risk-based prioritisation and one-click remediation through Intune.',
+      'Defender for Endpoint P2 includes core vulnerability management for supported onboarded endpoints. Premium vulnerability-management capabilities and other asset classes need a separate licensing and deployment review.',
     examples: ['Qualys VMDR', 'Tenable One', 'Rapid7 InsightVM', 'Ivanti Neurons for RBVM'],
     benchmarkPupm: 4,
     confidence: 'strong',
@@ -738,9 +734,9 @@ export const CATEGORIES: Category[] = [
     quickAssess: false,
     coverage: e5Already,
     caveat:
-      'New in the July 2026 packaging update: M365 E5 now includes a Security Copilot allocation of roughly 400 Security Compute Units per 1,000 licensed users per month, capped near 10,000 SCUs. That is a real entitlement, but it is metered — heavy or continuous agentic use will need provisioned SCUs on top. It also assumes you are already running Microsoft Defender; if your SOC is built on a third-party XDR, the copilot has far less to reason over.',
+      `Separate from the July 2026 pricing date, Security Copilot inclusion follows a phased tenant rollout. ${SECURITY_COPILOT_ALLOWANCE.summary} ${SECURITY_COPILOT_ALLOWANCE.conditions}`,
     talkTrack:
-      'The included SCU allocation is real but metered. Frame it as removing the pilot budget line rather than replacing a production SOC AI platform, and confirm they are actually on Defender — Security Copilot has very little to reason over otherwise.',
+      'Validate tenant enablement, actual consumption, supported data sources and remaining services. An included monthly allowance is not permission to delete provisioned capacity or cancel the entire SOC AI invoice.',
   },
 
   // ══════════════════════════════════════════════════════════ DATA SECURITY & COMPLIANCE
@@ -767,7 +763,7 @@ export const CATEGORIES: Category[] = [
     caveat:
       'Network-level DLP for non-Microsoft egress paths is thinner than a dedicated network DLP appliance.',
     talkTrack:
-      'Purview DLP is strong inside Microsoft 365 and on the endpoint. The gap is unmanaged devices and non-Microsoft SaaS. If their Forcepoint deployment is mostly Exchange, SharePoint and endpoint, this consolidates cleanly — ask for the policy inventory.',
+      'Obtain the DLP policy inventory and required endpoint, browser and non-Microsoft coverage. Validate each enforcement path and any consumption charges before confirming a retirement amount.',
   },
   {
     id: 'info-protection',
@@ -873,18 +869,18 @@ export const CATEGORIES: Category[] = [
     name: 'Data governance & catalogue',
     whatItIs:
       'Cataloguing where data lives across the estate, who owns it, what it means, and tracking its lineage through pipelines and reports.',
-    e7Component: 'Microsoft Purview Data Governance',
+    e7Component: 'Not included — Microsoft Purview Data Governance is pay-as-you-go',
     whyReplaced:
-      'Purview scans and catalogues data estate-wide with lineage, glossary and ownership, sharing classification with the security side of Purview.',
+      'Microsoft Purview Unified Catalog and data health capabilities use Azure pay-as-you-go billing. The E7 suite does not fund a catalog-platform replacement, so no retirement credit is modeled.',
     examples: ['Collibra', 'Alation', 'Informatica', 'Atlan', 'data.world'],
     benchmarkPupm: 3,
     confidence: 'partial',
     quickAssess: false,
-    coverage: allUpgrade,
+    coverage: notCovered,
     caveat:
-      'The Purview Unified Catalog premium tier is consumption-billed on top of E7 — this is a partial offset, not a clean replacement. Catalog tools are licensed per data steward, not per employee, so enter licensed users rather than total seats.',
+      'Governed assets and data health processing are separately metered. Some scanning can be free under specific conditions, but that is not a suite-funded replacement for an enterprise governance platform.',
     talkTrack:
-      'Be careful with this one. Purview Data Governance is not Collibra. If they run a mature data governance programme, mark it a partial upgrade and move on — overclaiming here costs you credibility on everything else.',
+      'Keep this budget: Purview Data Governance is not included as a suite-funded replacement. Any separate platform proposal needs its own Azure consumption, implementation and functional comparison.',
   },
   {
     id: 'compliance-posture',
@@ -915,16 +911,16 @@ export const CATEGORIES: Category[] = [
       'The platform staff use for video calls, screen sharing and webinars. Frequently duplicated: organisations standardise on Teams but keep a Zoom estate alive for years.',
     e7Component: 'Microsoft Teams',
     whyReplaced:
-      'Teams is included in every suite here. Parallel conferencing platforms are usually inertia rather than requirement.',
+      'The modeled with-Teams variants include Teams meetings. A parallel platform may serve specific external, event, accessibility or integration requirements; evaluate those before confirming retirement.',
     examples: ['Zoom Workplace', 'Cisco Webex', 'Google Meet', 'GoTo Meeting', 'Zoho Meeting'],
     benchmarkPupm: 15,
     confidence: 'strong',
     quickAssess: false,
     coverage: allAlready,
     caveat:
-      'Assumes a "with Teams" suite. Since April 2024 new enterprise customers buy M365 E3/E5/E7 (no Teams) plus standalone Teams Enterprise, so check which variant you hold before booking this saving.',
+      TEAMS_VARIANT_CONDITION,
     talkTrack:
-      'Ask how many meeting platforms they license. Two is common, three is not rare — and every suite in this assessment already includes Teams.',
+      'Confirm the purchased Teams variant and the workloads each meeting platform serves. Include only seats the customer confirms can move, and account for migration, external participants and contract timing.',
   },
   {
     id: 'ucaas-telephony',
@@ -953,13 +949,13 @@ export const CATEGORIES: Category[] = [
       'Dial-in numbers so participants can join meetings by phone when they have no data connection.',
     e7Component: 'Microsoft Teams Audio Conferencing',
     whyReplaced: 'Included with Teams meetings, with dial-in numbers across a wide set of countries.',
-    examples: ['Zoom Audio Conferencing', 'Webex Audio', 'GoTo Meeting audio'],
+    examples: ['Zoom Audio Conferencing', 'Webex Audio', 'GoTo Meeting audio', 'Dialpad Meetings'],
     benchmarkPupm: 4,
     confidence: 'full',
     quickAssess: false,
     coverage: allAlready,
     talkTrack:
-      'This has been included for years. If a dial-in line still appears on their invoice, that is live overspend they can fix this quarter with no upgrade at all. Small number, disproportionate trust.',
+      'Check assigned conferencing licences and regional dial-in, dial-out and toll-free allowances. An invoice may fund usage that is not included; do not label it overspend solely because the customer owns Teams.',
   },
   {
     id: 'webinars-events',
@@ -969,14 +965,14 @@ export const CATEGORIES: Category[] = [
       'Running large broadcast-style events with registration pages, attendee analytics and production controls.',
     e7Component: 'Teams Webinars and Town Hall',
     whyReplaced:
-      'Teams includes webinar registration and town halls. Since 1 April 2026 advanced production — organisational branding, eCDN, streaming chat, reactions and real-time event insights — moved from Teams Premium into core Teams.',
+      'Teams offers webinars and town halls. Confirm the current core/Premium feature split, tenant rollout and capacity limits for the event workload; this audit has not independently verified the detailed 2026 event packaging.',
     examples: ['ON24', 'Zoom Events', 'GoTo Webinar', 'RingCentral Events', 'Bizzabo'],
     benchmarkPupm: 3,
     confidence: 'partial',
     quickAssess: false,
     coverage: allUpgrade,
     caveat:
-      'Marketing-grade events with lead scoring and CRM integration usually keep a dedicated platform. Capacity is 3,000 interactive / 10,000 view-only, with attendee packs available beyond that.',
+      'Marketing events with lead scoring and CRM integration may need a dedicated platform. Capacity, production features and attendee add-ons require current licence validation.',
     talkTrack:
       'Teams Town Hall covers internal all-hands well. It does not do the registration funnels, lead scoring and CRM integration that marketing buys ON24 for. Ask who owns the budget — if it is marketing, expect to keep it.',
   },
@@ -997,7 +993,7 @@ export const CATEGORIES: Category[] = [
     caveat:
       'Regulated industries sometimes require a separately governed external-sharing platform. Content migration is a real project.',
     talkTrack:
-      'Pure double-pay for every baseline in this tool. If they run Box or Dropbox alongside M365, they are buying storage twice.',
+      'An included storage allowance is not proof that Box or Dropbox is redundant. Review external sharing, governance, capacity and migration with the teams who use it before confirming any cancellation.',
   },
   {
     id: 'whiteboarding',
@@ -1064,14 +1060,14 @@ export const CATEGORIES: Category[] = [
       'Channel-based messaging where work conversation lives — threads, direct messages, file sharing and app integrations. Commonly runs in parallel with Teams for years after a Microsoft standardisation.',
     e7Component: 'Microsoft Teams',
     whyReplaced:
-      'Teams chat and channels are included in every suite in this assessment, so a parallel chat platform is duplicate spend on a capability already owned.',
+      'Teams chat and channels are included in the modeled with-Teams variants. Evaluate specialist integrations and external collaboration before treating another platform as replaceable.',
     examples: ['Slack', 'Google Chat', 'Mattermost', 'Rocket.Chat', 'Discord'],
     benchmarkPupm: 12,
     confidence: 'strong',
     quickAssess: false,
     coverage: allAlready,
     caveat:
-      'Engineering teams with deep Slack app integrations migrate slowly, and external-partner Slack Connect channels need a Teams federation plan first.',
+      `${TEAMS_VARIANT_CONDITION} Engineering integrations and external-partner channels need a migration and federation review.`,
     talkTrack:
       'Ask who is still on Slack and why. The usual answer is engineering culture rather than capability — which makes it a change-management conversation, not a licensing one.',
   },
@@ -1130,7 +1126,7 @@ export const CATEGORIES: Category[] = [
     caveat:
       'Only licensed for agents, not all staff — enter the agent count rather than total seats if you record spend here.',
     talkTrack:
-      'Never let anyone leave the room thinking Teams Phone is a contact centre. No queue management, no workforce management, no omnichannel routing. Naming this exclusion plainly protects the entire business case.',
+      'Teams Phone has call queues, but is not a full contact centre with workforce management and omnichannel routing. Name the exclusion and keep CCaaS costs separate from the PBX licence comparison.',
   },
 
   // ══════════════════════════════════════════════════════════ ANALYTICS & AUTOMATION
@@ -1172,7 +1168,7 @@ export const CATEGORIES: Category[] = [
     caveat:
       'Power Platform seeded rights do not tier with your suite: E7 adds no Power Automate entitlement over O365 E3, M365 E3 or E5. Premium connectors, Dataverse and higher API limits need Power Automate Premium, a separate purchase at every tier including E7.',
     talkTrack:
-      'This is a "you already own it" line, not an E7 upgrade — seeded Power Automate is the same in O365 E3 as in E7. If they are paying Zapier for flows that only touch Microsoft 365 on standard connectors, that is duplicate spend today. If Zapier is wiring Salesforce to Stripe, seeded rights do not reach it and premium licensing is a separate cost. Get that split before you claim anything.',
+      'Compare the current flow inventory with seeded rights; there is no new E7 premium entitlement here. Confirm connectors, limits and support needs before treating an existing automation invoice as replaceable.',
   },
   {
     id: 'rpa',
@@ -1211,7 +1207,7 @@ export const CATEGORIES: Category[] = [
     caveat:
       'E7 adds no Power Apps entitlement over O365 E3, M365 E3 or E5. Apps needing Dataverse, premium connectors or model-driven experiences require Power Apps Premium at every tier.',
     talkTrack:
-      'Same shape as Power Automate: they already own the seeded rights, so this is a duplicate-spend argument rather than an E7 one. The moment they need premium connectors or Dataverse it becomes a separate licence. Say that before their architect does.',
+      'Evaluate existing seeded rights separately from E7. Premium connectors, Dataverse, governance and application needs can justify a separate platform; confirm the exact scope before claiming retirement.',
   },
   {
     id: 'forms-surveys',
@@ -1238,7 +1234,7 @@ export const CATEGORIES: Category[] = [
     name: 'Project & work management',
     whatItIs:
       'Tracking tasks, sprints, dependencies and portfolios across teams, with boards, timelines and reporting.',
-    e7Component: 'Microsoft Planner (Planner Premium for scheduling)',
+    e7Component: 'Microsoft Planner basic — Premium is separately licensed',
     whyReplaced:
       'Planner in Teams covers team-level task and work management, with Planner Premium available for scheduling and resource management.',
     examples: ['Asana', 'Monday.com', 'Smartsheet', 'Wrike', 'Atlassian Jira'],
@@ -1255,6 +1251,11 @@ export const CATEGORIES: Category[] = [
 ];
 
 // ─────────────────────────────────────────────────────────────── helpers
+
+export const CATEGORIES: Category[] = CATEGORY_RECORDS.map((category) => ({
+  requiresConfirmation: true,
+  ...category,
+}));
 
 export const QUICK_ASSESS_CATEGORIES = CATEGORIES.filter((c) => c.quickAssess);
 

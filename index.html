@@ -9,6 +9,14 @@
       content="Capture what you spend on point solutions today and see what Microsoft 365 E7 actually nets out to after consolidation."
     />
     <link rel="icon" href="data:," />
+    <script>
+      (() => {
+        const param = new URLSearchParams(window.location.search).get("scoutTheme");
+        const theme =
+          param || (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+        document.documentElement.setAttribute("data-theme", theme);
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

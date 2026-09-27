@@ -1,12 +1,12 @@
 import type { DomainId } from './categories';
+import { SECURITY_COPILOT_ALLOWANCE } from './sources';
+import type { EvidenceStatus } from './sources';
 
 /**
  * Seller mode's content layer.
  *
- * The rule everything here follows: a seller who repeats this in front of a customer must not
- * later have to walk it back. So every battlecard names where the incumbent genuinely wins, and
- * every objection response concedes the true part before answering. A play that only works if
- * the customer does not know their own estate is not a play, it is a liability.
+ * Discovery prompts are hypotheses, not verified comparative product claims.
+ * Validate actual workloads, invoices and customer assumptions before presenting savings.
  */
 
 export interface Battlecard {
@@ -21,30 +21,32 @@ export interface Battlecard {
   theyWin: string;
   /** The overclaim that gets a seller caught. */
   trap: string;
+  sourceIds?: string[];
+  evidenceStatus?: EvidenceStatus;
 }
 
-export const BATTLECARDS: Battlecard[] = [
+const BATTLECARD_RECORDS: Battlecard[] = [
   {
     match: /crowdstrike|falcon/i,
     vendor: 'CrowdStrike',
     counter: 'Microsoft Defender for Endpoint P2',
     wedge:
-      'They are already paying for Defender inside E5/E7 and running it in passive mode. That is a second endpoint budget for a capability they own. Start with the licence audit, not the product comparison.',
+      'If the customer licenses Defender in E5/E7, evaluate whether its required endpoint workloads could move. Do not assume Defender is deployed or that a separate endpoint invoice is redundant.',
     theyWin:
       'Threat hunting workflow, Linux and legacy OS coverage, and a SOC team already fluent in the console. Falcon Complete is a managed service Microsoft does not directly replicate.',
     trap:
-      'Do not claim a like-for-like swap for a mature SOC. Propose a coexistence period and a measured cutover on a defined workload — the credit in this model assumes a retained share for exactly this reason.',
+      'Do not claim a like-for-like swap for a mature SOC. Propose a coexistence period and a measured cutover on a defined workload. This model assumes full replacement; it is not a prediction that every operational requirement will migrate.',
   },
   {
     match: /okta|ping identity|pingone|jumpcloud|duo/i,
     vendor: 'Okta / Ping / Duo',
     counter: 'Microsoft Entra ID P2 + Entra Suite',
     wedge:
-      'Entra is already the identity provider for every Microsoft workload they run. Paying a second IdP to broker access back into Microsoft 365 is the clearest double-spend in the estate.',
+      'Review the identity architecture and purchased Entra plan. A second provider may support required applications, customer identity or resilience; existing suite ownership alone does not establish double payment.',
     theyWin:
       'Deep non-Microsoft SaaS integration catalogues, customer identity (CIAM), and organisations with a deliberate multi-cloud, vendor-neutral identity strategy.',
     trap:
-      'Migration is a project, not a switch. App-by-app re-federation, legacy SAML apps and MFA re-enrolment are real cost and real elapsed time. Model a retained share for the long tail.',
+      'Migration is a project, not a switch. App-by-app re-federation, legacy SAML apps and MFA re-enrolment are real cost and real elapsed time. Validate the long tail before relying on the full-replacement scenario, and model a realistic savings delay.',
   },
   {
     match: /zscaler|netskope|palo alto|prisma|cloudflare|umbrella|forcepoint/i,
@@ -62,7 +64,7 @@ export const BATTLECARDS: Battlecard[] = [
     vendor: 'Proofpoint / Mimecast / Abnormal',
     counter: 'Microsoft Defender for Office 365 P2',
     wedge:
-      'A third-party mail gateway in front of Exchange Online duplicates filtering they already own, and adds a mail-flow hop that complicates every delivery investigation.',
+      'Compare actual filtering and response requirements with the purchased Defender plan. A second gateway may be an intentional defence-in-depth control, so validate the security design before proposing retirement.',
     theyWin:
       'Abnormal in particular on behavioural BEC detection; Proofpoint on granular DLP for mail and on very large, heavily-tuned rule estates.',
     trap:
@@ -73,7 +75,7 @@ export const BATTLECARDS: Battlecard[] = [
     vendor: 'Splunk / QRadar',
     counter: 'Microsoft Sentinel — priced separately, NOT included in E7',
     wedge:
-      'There is no consolidation play here on licence cost. The honest angle is data architecture: E5/E7 already ships the connectors and the security data, so a Sentinel move can cut ingest volume and tiering cost.',
+      'There is no included SIEM licence saving. A separate Sentinel evaluation needs measured ingestion, retention, connectors, automation and operating costs; do not infer savings from the E7 bundle.',
     theyWin:
       'Everything about a mature SIEM: content library, custom parsers, years of tuned detections, and non-security observability use cases.',
     trap:
@@ -84,7 +86,7 @@ export const BATTLECARDS: Battlecard[] = [
     vendor: 'ChatGPT Enterprise / Gemini / Glean',
     counter: 'Microsoft 365 Copilot, included in E7',
     wedge:
-      'Copilot moves from a $30 add-on to included. If they are running a paid GenAI pilot alongside an E5 estate, the E7 upgrade delta is substantially pre-funded by cancelling it.',
+      'Copilot inclusion creates an evaluation opportunity. Compare the actual assistant invoice, adoption and retained specialist/API use before claiming any offset to the E7 upgrade.',
     theyWin:
       'Raw model choice and speed of frontier-model access, developer-facing tooling, and connectors into non-Microsoft content where the user works all day outside Office.',
     trap:
@@ -95,7 +97,7 @@ export const BATTLECARDS: Battlecard[] = [
     vendor: 'Tableau / Qlik / Looker',
     counter: 'Power BI Pro, included in the suite',
     wedge:
-      'Power BI Pro is already included, so most Tableau viewer seats are paid twice. Viewer-tier consolidation is usually the fastest win and does not touch the analyst community.',
+      'Power BI Pro is a relevant E5/E7 entitlement. Review viewers, authors, report migration and required capacity before confirming replaceable seats; owning both products is not proof of duplicate spend.',
     theyWin:
       'Analyst affinity and visual grammar, and genuinely large or complex extract-based models. Analysts do not switch tools quietly.',
     trap:
@@ -106,7 +108,7 @@ export const BATTLECARDS: Battlecard[] = [
     vendor: 'Box / Dropbox Business',
     counter: 'OneDrive and SharePoint, already included',
     wedge:
-      'Storage they already own, sitting unused next to a paid alternative. Often survives purely as habit or a single departmental workflow.',
+      'Review included storage alongside external collaboration, governance, quotas and workflows. A separate platform may be justified; confirm the scope and migration effort before cancelling it.',
     theyWin:
       'External collaboration UX, and industry-specific governance workflows (Box Shield, Box Sign) embedded in regulated processes.',
     trap:
@@ -126,31 +128,33 @@ export const BATTLECARDS: Battlecard[] = [
   {
     match: /cyberark|beyondtrust|delinea|thycotic|hashicorp vault/i,
     vendor: 'CyberArk / BeyondTrust / Delinea',
-    counter: 'Entra Privileged Identity Management + Permissions Management',
+    counter: 'Entra Privileged Identity Management + Intune Endpoint Privilege Management',
+    sourceIds: ['permissions-management-retirement', 'm365-packaging-2026'],
+    evidenceStatus: 'conditional',
     wedge:
-      'Just-in-time elevation and cloud entitlement management for Azure, AWS and GCP identities is included in the full Entra Suite that E7 unlocks.',
+      'Evaluate Entra/Azure role elevation and eligible Windows endpoint elevation only. Entra Permissions Management retired on October 1, 2025; no multicloud CIEM entitlement is claimed in E7.',
     theyWin:
       'Credential vaulting, session recording, and privileged access to on-premises and OT systems. This is a genuinely different product category.',
     trap:
-      'PIM is not a vault. Do not position it against secrets management — you will be corrected in the room by someone who runs it.',
+      'PIM is not a vault or a replacement for retired multicloud CIEM. Credential vaulting, session recording, servers and OT remain separate; validate the module-level retirement scope.',
   },
   {
     match: /jamf|workspace one|airwatch|ivanti|kandji|mosyle/i,
     vendor: 'Jamf / Workspace ONE',
     counter: 'Microsoft Intune, plus the Intune Suite capabilities',
     wedge:
-      'Intune is already licensed. Where the estate is majority Windows, a second UEM is duplicated spend for the same enrolled devices.',
+      'Check the purchased Intune plan and actual device population. A second UEM may cover different devices or required features; validate enrolment and workload parity before claiming retirement.',
     theyWin:
       'Jamf on same-day macOS and iOS feature support, and on Apple-first organisations where Mac admins have deep tooling investment.',
     trap:
-      'Do not propose displacing Jamf in a design or engineering org. Model the Mac fleet as a retained share and take the Windows and mobile consolidation instead.',
+      'Do not assume Jamf can be displaced in a design or engineering org. Test the Mac-specific workflows explicitly; a full-replacement scenario overstates savings if the specialist platform must remain.',
   },
   {
     match: /knowbe4|hoxhunt|cofense|proofpoint security awareness|ninjio/i,
     vendor: 'KnowBe4 / Hoxhunt',
     counter: 'Microsoft Defender Attack Simulation Training',
     wedge:
-      'Small contract, easy win, and it is already included. Useful as a low-friction first consolidation that proves the pattern before the contested ones.',
+      'Compare the required simulations, training content, languages and audit evidence with the included Defender plan. A small invoice is not automatically a cancellable one.',
     theyWin:
       'Content library depth, localisation, and reporting that compliance teams have already built audit evidence around.',
     trap:
@@ -172,7 +176,7 @@ export const BATTLECARDS: Battlecard[] = [
     vendor: 'Qualys / Tenable / Rapid7',
     counter: 'Microsoft Defender Vulnerability Management',
     wedge:
-      'Agent consolidation is the argument as much as licence cost — Defender is already deployed on the endpoint, so this removes a second agent from every managed device.',
+      'If Defender is deployed, evaluate core endpoint vulnerability coverage against the current scanner scope. Premium features, unmanaged assets, servers and network scanning may remain separately licensed.',
     theyWin:
       'Unauthenticated network scanning, OT and unmanaged asset discovery, and compliance scanning against specific benchmark standards.',
     trap:
@@ -183,7 +187,7 @@ export const BATTLECARDS: Battlecard[] = [
     vendor: 'Relativity / Exterro / Nuix',
     counter: 'Microsoft Purview eDiscovery Premium',
     wedge:
-      'For Microsoft 365 data — mail, Teams, SharePoint, OneDrive — collection happens in place, without export and re-hosting. That is where most of their volume is.',
+      'Evaluate in-place collection for Microsoft 365 sources. Measure the customer data mix and required legal review workflow rather than assuming most volume can stay inside Purview.',
     theyWin:
       'Review workflow, analytics and processing at scale, plus data from outside Microsoft 365. Legal teams and outside counsel are deeply committed to their review platform.',
     trap:
@@ -200,6 +204,12 @@ export const BATTLECARDS: Battlecard[] = [
       'Do not put this in the savings column. If it is captured as spend, it should score as not covered — leaving it in the credit is the kind of error that invalidates the whole model in review.',
   },
 ];
+
+export const BATTLECARDS: Battlecard[] = BATTLECARD_RECORDS.map((card) => ({
+  sourceIds: ['m365-product-terms'],
+  evidenceStatus: 'unverified',
+  ...card,
+}));
 
 export function findBattlecards(vendors: string[]): Battlecard[] {
   const seen = new Set<string>();
@@ -225,6 +235,8 @@ export interface Objection {
   answer: string;
   /** Only surfaced when this is true of the current deal. */
   when?: (ctx: DealContext) => boolean;
+  sourceIds?: string[];
+  evidenceStatus?: EvidenceStatus;
 }
 
 export interface DealContext {
@@ -238,20 +250,20 @@ export interface DealContext {
   avoidedSelected: number;
 }
 
-export const OBJECTIONS: Objection[] = [
+const OBJECTION_RECORDS: Objection[] = [
   {
     id: 'sticker',
     objection: '"$99 a user is far more than we pay today."',
-    concede: 'It is. On sticker price alone this is the largest per-seat suite Microsoft sells.',
+    concede: 'The published E7 reference is $99 per user; the customer comparison depends on actual prices.',
     answer:
-      'Sticker price is the wrong comparison because it is not what you pay today either — you pay for the suite plus everything around it. Put the vendor contracts next to it and compare total cost to total cost. That is the number on this page.',
+      'Compare actual current recurring spend with the proposed licence cost plus retained tools. Explain that covered invoices are fully replaced in this scenario, validate that scope before acting, and report a cost increase plainly if that is the result.',
   },
   {
     id: 'net-negative',
     objection: '"Even after consolidation the total still goes up."',
     concede: 'On the spend captured so far, yes, and pretending otherwise would be dishonest.',
     answer:
-      'Two honest routes forward. First, this only counts what we have entered — most estates have more contracts than anyone remembers in one sitting. Second, the discount slider is real: this is a negotiation, and the gap is a number you can take to the table rather than an argument you have lost.',
+      'Keep the negative result visible. Verify the inventory and actual quote, but do not invent more spend or an expected discount to force a positive case. Staying on the current suite may be the better financial choice.',
     when: (c) => c.netAnnual < 0,
   },
   {
@@ -274,7 +286,7 @@ export const OBJECTIONS: Objection[] = [
     objection: '"We are locked into these contracts for another two years."',
     concede: 'Then the savings do not land on day one, and the model should not pretend they do.',
     answer:
-      'Set the retained share on each line to reflect the term you are stuck with. It makes the first-year number smaller and the whole case more credible. Renewal dates are also leverage — knowing which contracts expire when tells you the order to sequence this in.',
+      'Use the savings delay in whole months for the cancellable share of each invoice. Retained share describes spending that continues in steady state, not a temporary contract lock-in. Renewal notes alone do not calculate timing.',
   },
   {
     id: 'security-team',
@@ -289,7 +301,7 @@ export const OBJECTIONS: Objection[] = [
     concede:
       'Less than the marketing suggests. E5 to E7 is a shorter list than E3 to E5.',
     answer:
-      'Three things are genuinely new: Copilot included rather than a $30 add-on, Agent 365 for governing AI agents, and the full Entra Suite instead of just Entra ID P2. But the sharper finding for an E5 customer is usually the redundant-today bucket — capability you already own and are paying a vendor for a second time.',
+      'E7 bundles Copilot, Agent 365 and the full Entra Suite over E5. Check existing add-ons before calling any capability new. Baseline optimization is separate from E7-unlocked savings, and existing ownership is not proof of a duplicate invoice.',
     when: (c) => c.baseline === 'm365e5',
   },
   {
@@ -297,7 +309,7 @@ export const OBJECTIONS: Objection[] = [
     objection: '"Why would we upgrade before fixing what we already have?"',
     concede: 'You should not. That is the right instinct and the right sequence.',
     answer:
-      'Fix the redundant-today bucket first — it is savings you can take without buying anything. Do that, prove the consolidation muscle works, and the E7 conversation becomes an extension of a track record rather than a leap of faith.',
+      'Review baseline optimization first. Only validated functional scope with an actual cancellation path can become savings, and migration may still cost money. Do not attribute those baseline opportunities to buying E7.',
     when: (c) => c.redundantToday > 0,
   },
   {
@@ -312,15 +324,15 @@ export const OBJECTIONS: Objection[] = [
     objection: '"What does this not cover?"',
     concede: 'Genuinely quite a lot, and you should have the list before you commit.',
     answer:
-      'SIEM, PSTN calling plans, Security Copilot, premium Power Platform capacity and Project all remain separate purchases. Those are on the exclusions panel with your own numbers in them. A business case that omits them does not survive its first review.',
+      `SIEM, PSTN calling plans, premium Power Platform, Project and separately metered services remain outside the suite. ${SECURITY_COPILOT_ALLOWANCE.summary} ${SECURITY_COPILOT_ALLOWANCE.conditions}`,
     when: (c) => c.notCoveredAnnual > 0,
   },
   {
     id: 'benchmark-value',
     objection: '"The new-capability value looks made up."',
-    concede: 'It is benchmark-priced, not quoted, and it is softer than the cash side.',
+    concede: 'The stored benchmarks are illustrative USD planning estimates, not quotes.',
     answer:
-      'Which is exactly why it is reported separately and never added to the net impact or the TCO. Treat it as what you would have had to budget if you wanted these capabilities another way — and if you would not have bought them at all, untick them. The number should reflect your actual plans.',
+      'Keep it separate from recurring cash savings and TCO. Select only capabilities the customer actually plans to buy, and discuss the budget, modeled users and USD amount. A category planning estimate is not a vendor quote or a cash saving.',
     when: (c) => c.avoidedSelected > 0,
   },
   {
@@ -332,6 +344,12 @@ export const OBJECTIONS: Objection[] = [
     when: (c) => c.capturedLines < 5,
   },
 ];
+
+export const OBJECTIONS: Objection[] = OBJECTION_RECORDS.map((objection) => ({
+  sourceIds: objection.id === 'exclusions' ? ['security-copilot-inclusion', 'm365-product-terms'] : ['m365-product-terms'],
+  evidenceStatus: 'unverified',
+  ...objection,
+}));
 
 // ---------------------------------------------------------------------------- discovery
 

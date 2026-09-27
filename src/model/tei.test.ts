@@ -51,6 +51,172 @@ function tei(over: Partial<TeiSettings>): TeiSettings {
   return { ...DEFAULT_TEI_SETTINGS, enabled: true, ...over };
 }
 
+function combinedAssessment(over: Partial<Assessment> = {}): Assessment {
+  const a = assessment(over);
+  const lineOverrides = Object.fromEntries(TEI_STUDIES.flatMap((study) =>
+    study.lines.map((line) => [line.id, line.id === 'copilot-operations'])));
+  return {
+    ...a,
+    tei: { ...a.tei, lineOverrides, combinedReviewed: true, enablementOverlapReviewed: true },
+  };
+}
+
+describe('separate-study and combined simulation policy', () => {
+  it('uses USD cash readiness rather than legacy amount or price confirmations', () => {
+    const a = combinedAssessment({
+      lines: [{
+        categoryId: 'edr-xdr', vendor: 'Illustrative invoice', mode: 'annual', annual: 60_000,
+        retainPct: 100, amountSource: 'benchmark', assumptionConfirmed: false,
+      }],
+    });
+    const cash = computeAssessment(a);
+    expect(a.assumptions.pricesConfirmed).toBe(false);
+    expect(cash.cashEstimateReady).toBe(true);
+    expect(computeTei(a, { ...cash, cashEstimateConfirmed: false }).canCombine).toBe(true);
+    expect(computeTei(a, { ...cash, cashEstimateReady: false, cashEstimateConfirmed: true }).canCombine).toBe(false);
+  });
+
+  it('does not let combined review or legacy confirmations bypass duplicate cash invoices', () => {
+    const a = combinedAssessment({
+      addOns: [
+        { addOnId: 'entra-suite', mode: 'annual', annual: 2_400, assumptionConfirmed: true },
+        { addOnId: 'entra-id-governance', mode: 'annual', annual: 1_200, assumptionConfirmed: true },
+      ],
+    });
+    a.assumptions.pricesConfirmed = true;
+    const r = computeTei(a, computeAssessment(a));
+    expect(r.canCombine).toBe(false);
+    expect(r.combinationWarnings.join(' ')).toContain('ambiguous USD cash-model inputs');
+    expect(r.cashBenefitPv).toBe(0);
+    expect(r.npv).toBeNull();
+    a.addOns.pop();
+    expect(computeTei(a, computeAssessment(a)).canCombine).toBe(true);
+  });
+
+  it('distinguishes a profitable combination with no initial investment from unreached payback', () => {
+    const a = combinedAssessment({
+      seats: 100,
+      assumptions: { ...DEFAULT_ASSUMPTIONS, baselineUnitPupm: 60, e7ListPupm: 99 },
+      tei: tei({ copilotAdoptionPct: 100, confidencePct: 100, includeEnablementCost: true }),
+    });
+    const r = computeTei(a, computeAssessment(a));
+    expect(r.canCombine).toBe(true);
+    expect(r.scoredLines.filter((line) => line.included).map((line) => line.lineId)).toEqual(['copilot-operations']);
+    expect(r.migrationTotal).toBe(0);
+    expect(r.years[0].net).toBeGreaterThan(0);
+    expect(r.paybackMonths).toBeNull();
+    expect(r.paybackStatus).toBe('no-investment');
+
+    a.assumptions.transitionEnabled = true;
+    a.assumptions.transitionCost = 1e12;
+    const unreached = computeTei(a, computeAssessment(a));
+    expect(unreached.canCombine).toBe(true);
+    expect(unreached.paybackMonths).toBeNull();
+    expect(unreached.paybackStatus).toBe('not-reached');
+  });
+
+  it('requires a persisted specific training-cost review, not merely a transition budget', () => {
+    const a = combinedAssessment({
+      assumptions: { ...DEFAULT_ASSUMPTIONS, transitionEnabled: true, transitionCost: 1_000_000 },
+      tei: tei({ includeEnablementCost: false }),
+    });
+    a.tei.enablementOverlapReviewed = false;
+    const unreviewed = computeTei(a, computeAssessment(a));
+    expect(unreviewed.canCombine).toBe(false);
+    expect(unreviewed.combinationWarnings.join(' ')).toContain('exact excluded Copilot training cost');
+    a.tei.enablementOverlapReviewed = true;
+    expect(computeTei(a, computeAssessment(a)).canCombine).toBe(true);
+  });
+  it('shows standalone USD benefits without assigning common investment to each study', () => {
+    const a = assessment();
+    const r = computeTei(a, computeAssessment(a));
+    expect(r.enabled).toBe(true);
+    expect(r.canCombine).toBe(false);
+    expect(r.paybackStatus).toBe('withheld');
+    expect(r.referenceCurrency).toBe('USD');
+    expect(r.studies.some((study) => study.presentValue > 0)).toBe(true);
+    for (const study of r.studies) {
+      expect(study.total).toBeCloseTo(study.byYear.reduce((sum, value) => sum + value, 0), 6);
+    }
+    expect(r.npv).toBeNull();
+    expect(r.roiPct).toBeNull();
+    expect(r.totalBenefitPv).toBe(0);
+    expect(r.costPv).toBe(0);
+    expect(r.years).toEqual([]);
+    expect(r.combinationWarnings.join(' ')).toContain('review');
+  });
+
+  it('withholds mixed-currency ROI even after an explicit review', () => {
+    const a = combinedAssessment({ currency: 'EUR' });
+    const r = computeTei(a, computeAssessment(a));
+    expect(r.canCombine).toBe(false);
+    expect(r.teiBenefitPv).toBeGreaterThan(0);
+    expect(r.cashBenefitPv).toBe(0);
+    expect(r.npv).toBeNull();
+    expect(r.combinationWarnings.join(' ')).toContain('non-USD');
+  });
+
+  it('a blanket review cannot legitimate active overlapping benefits', () => {
+    const groups = new Map<string, string[]>();
+    for (const study of TEI_STUDIES) for (const line of study.lines) {
+      const group = (line as typeof line & { overlapGroup?: string }).overlapGroup;
+      if (group) groups.set(group, [...(groups.get(group) ?? []), line.id]);
+    }
+    const duplicate = [...groups.values()].find((ids) => ids.length > 1);
+    expect(duplicate).toBeDefined();
+    const a = combinedAssessment({ baseline: 'm365e3' });
+    for (const id of duplicate!) a.tei.lineOverrides[id] = true;
+    const r = computeTei(a, computeAssessment(a));
+    expect(r.canCombine).toBe(false);
+    expect(r.combinationWarnings.join(' ')).toContain('overlapping benefit group');
+    expect(r.npv).toBeNull();
+  });
+
+  it('requires cash-consolidation study lines to remain excluded in a combined simulation', () => {
+    const a = combinedAssessment({ baseline: 'm365e3' });
+    a.tei.lineOverrides['e5-legacy-software'] = true;
+    const r = computeTei(a, computeAssessment(a));
+    expect(r.canCombine).toBe(false);
+    expect(r.combinationWarnings.join(' ')).toContain('common cash benefit');
+  });
+
+  it.each(['copilot', 'copilot-m365'])('does not treat already-purchased %s as wholly new TEI value', (addOnId) => {
+    const a = assessment({ addOns: [{ addOnId, mode: 'annual', annual: 1_200 }] });
+    const r = computeTei(a, computeAssessment(a));
+    expect(r.studies.find((study) => study.studyId === 'copilot')?.total).toBe(0);
+    expect(r.studies.find((study) => study.studyId === 'copilot')?.notApplicableReason).toContain('already bought');
+  });
+
+  it('uses the golden scheduled cash benefits and transition charge exactly once', () => {
+    const a = combinedAssessment({
+      seats: 100,
+      assumptions: {
+        ...DEFAULT_ASSUMPTIONS, horizonYears: 4, transitionEnabled: true, transitionCost: 6_000,
+      },
+      lines: [{
+        categoryId: 'edr-xdr', vendor: 'Customer', mode: 'annual', annual: 60_000,
+        retainPct: 20, savingsDelayMonths: 6, amountSource: 'customer', assumptionConfirmed: true,
+      }],
+      addOns: [{
+        addOnId: 'copilot', mode: 'annual', annual: 7_200, savingsDelayMonths: 3,
+        amountSource: 'customer', assumptionConfirmed: true,
+      }],
+      tei: tei({ confidencePct: 0, includeEnablementCost: false }),
+    });
+    const cash = computeAssessment(a);
+    const r = computeTei(a, cash);
+    expect(r.canCombine).toBe(true);
+    expect(r.years.map((year) => year.cashBenefit)).toEqual([35_400, 67_200, 67_200, 67_200]);
+    expect(r.years[0].net).toBe(-11_400);
+    expect(r.years[0].cumulativeNet).toBe(-17_400);
+    expect(r.years[3].cumulativeNet).toBe(43_800);
+    expect(r.paybackMonths).toBe(23);
+    expect(r.paybackStatus).toBe('reached');
+    expect(r.cashBenefitPv).toBeCloseTo(35_400 / 1.1 + 67_200 / 1.1 ** 2 + 67_200 / 1.1 ** 3 + 67_200 / 1.1 ** 4, 6);
+    expect(r.costPv).toBeCloseTo(6_000 + [1, 2, 3, 4].reduce((sum, year) => sum + 46_800 / 1.1 ** year, 0), 6);
+  });
+});
+
 describe('study data reconciles to the published figures', () => {
   it.each(TEI_STUDIES.map((s) => [s.id, s] as const))(
     '%s: every line re-multiplies to its published year values',
@@ -216,7 +382,10 @@ describe('baseline awareness', () => {
   });
 
   it('produces a larger simulation for an E3 customer than an E5 one', () => {
-    const e3 = assessment({ baseline: 'm365e3' });
+    const e3 = assessment({
+      baseline: 'm365e3',
+      tei: tei({ lineOverrides: { 'e5-productivity': true } }),
+    });
     const e5 = assessment({ baseline: 'm365e5' });
     expect(computeTei(e3, computeAssessment(e3)).teiBenefitPv).toBeGreaterThan(
       computeTei(e5, computeAssessment(e5)).teiBenefitPv,
@@ -235,7 +404,7 @@ describe('scaling to the customer', () => {
         confidencePct: 100,
         copilotAdoptionPct: 0,
         includeEnablementCost: false,
-        lineOverrides: { 'e5-legacy-software': true, 'e5-travel': true },
+        lineOverrides: Object.fromEntries(getStudy('m365e5')!.lines.map((line) => [line.id, true])),
       }),
     });
     const result = computeTei(a, computeAssessment(a));
@@ -277,7 +446,8 @@ describe('scaling to the customer', () => {
       assumptions: { ...DEFAULT_ASSUMPTIONS, horizonYears: 5 },
     });
     const result = computeTei(a, computeAssessment(a));
-    expect(result.years).toHaveLength(5);
+    expect(result.studies.every((study) => study.byYear.length === 5)).toBe(true);
+    expect(result.years).toHaveLength(0);
     expect(result.scoredLines[0].byYear).toHaveLength(5);
   });
 
@@ -289,7 +459,7 @@ describe('scaling to the customer', () => {
 
 describe('costs and the resulting ROI', () => {
   it('charges Copilot enablement from the study’s own training line', () => {
-    const a = assessment({
+    const a = combinedAssessment({
       seats: 1_000,
       tei: tei({ copilotAdoptionPct: 100, includeEnablementCost: true }),
     });
@@ -299,13 +469,13 @@ describe('costs and the resulting ROI', () => {
   });
 
   it('drops enablement when switched off', () => {
-    const a = assessment({ tei: tei({ includeEnablementCost: false }) });
+    const a = combinedAssessment({ tei: tei({ includeEnablementCost: false }) });
     expect(computeTei(a, computeAssessment(a)).enablementTotal).toBe(0);
   });
 
   it('scales enablement with Copilot adoption', () => {
-    const half = assessment({ seats: 1_000, tei: tei({ copilotAdoptionPct: 50 }) });
-    const full = assessment({ seats: 1_000, tei: tei({ copilotAdoptionPct: 100 }) });
+    const half = combinedAssessment({ seats: 1_000, tei: tei({ copilotAdoptionPct: 50 }) });
+    const full = combinedAssessment({ seats: 1_000, tei: tei({ copilotAdoptionPct: 100 }) });
     closeTo(
       computeTei(half, computeAssessment(half)).enablementTotal * 2,
       computeTei(full, computeAssessment(full)).enablementTotal,
@@ -314,7 +484,7 @@ describe('costs and the resulting ROI', () => {
 
   it('treats a negative uplift as benefit, never as a negative cost', () => {
     // E7 cheaper than the current baseline: the uplift must not become a negative denominator.
-    const a = assessment({
+    const a = combinedAssessment({
       assumptions: { ...DEFAULT_ASSUMPTIONS, baselineUnitPupm: 200, e7ListPupm: 99 },
     });
     const result = computeTei(a, computeAssessment(a));
@@ -324,7 +494,7 @@ describe('costs and the resulting ROI', () => {
   });
 
   it('reports ROI as null rather than dividing by a zero cost base', () => {
-    const a = assessment({
+    const a = combinedAssessment({
       seats: 0,
       assumptions: { ...DEFAULT_ASSUMPTIONS, migrationCostPerSeat: 0 },
       tei: tei({ includeEnablementCost: false }),
@@ -333,16 +503,17 @@ describe('costs and the resulting ROI', () => {
   });
 
   it('keeps NPV equal to benefits less costs', () => {
-    const a = assessment({ baseline: 'm365e3', assumptions: { ...DEFAULT_ASSUMPTIONS, migrationCostPerSeat: 15 } });
+    const a = combinedAssessment({ baseline: 'm365e3', assumptions: { ...DEFAULT_ASSUMPTIONS, transitionEnabled: true, transitionCost: 150_000 } });
     const r = computeTei(a, computeAssessment(a));
-    closeTo(r.npv, r.totalBenefitPv - r.costPv);
+    expect(r.canCombine).toBe(true);
+    closeTo(r.npv!, r.totalBenefitPv - r.costPv);
     closeTo(r.totalBenefitPv, r.teiBenefitPv + r.cashBenefitPv);
   });
 
   it('charges migration once, at time zero, and not again inside year one', () => {
-    const a = assessment({
+    const a = combinedAssessment({
       seats: 1_000,
-      assumptions: { ...DEFAULT_ASSUMPTIONS, migrationCostPerSeat: 50 },
+      assumptions: { ...DEFAULT_ASSUMPTIONS, transitionEnabled: true, transitionCost: 50_000 },
     });
     const r = computeTei(a, computeAssessment(a));
     expect(r.migrationTotal).toBe(50_000);
@@ -356,7 +527,7 @@ describe('costs and the resulting ROI', () => {
   });
 
   it('returns a payback of null when the move never gets there', () => {
-    const a = assessment({
+    const a = combinedAssessment({
       seats: 1_000,
       baseline: 'm365e5',
       assumptions: { ...DEFAULT_ASSUMPTIONS, baselineUnitPupm: 0, e7ListPupm: 10_000 },
@@ -378,14 +549,16 @@ describe('opt-in and robustness', () => {
     delete (a as Partial<Assessment>).tei;
     const result = computeTei(a, computeAssessment(a));
     expect(result.enabled).toBe(false);
-    expect(Number.isFinite(result.npv)).toBe(true);
+    expect(result.npv).toBeNull();
+    expect(result.teiBenefitPv).toBe(0);
   });
 
   it('produces finite numbers for a zero-seat assessment', () => {
     const a = assessment({ seats: 0 });
     const r = computeTei(a, computeAssessment(a));
     expect(r.teiBenefitPv).toBe(0);
-    expect(Number.isFinite(r.npv)).toBe(true);
+    expect(r.npv).toBeNull();
+    expect(r.costPv).toBe(0);
   });
 
   it('clamps out-of-range percentages instead of producing nonsense', () => {
