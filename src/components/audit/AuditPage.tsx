@@ -169,7 +169,7 @@ function CategoryRecord({ record, baselineName }: { record: AuditLog['categories
         ? 'Not a capability gap for the selected baseline'
         : !record.currentAvoidedCapability.priced
           ? 'No standalone Microsoft licence is priced for this capability; not valued'
-          : `On its own: ${record.currentAvoidedCapability.standaloneLicenceNames.join(' + ') || 'already licensed'} for ${formatNumber(record.currentAvoidedCapability.users)} users, ${money(record.currentAvoidedCapability.standaloneAnnual)} / year${record.currentAvoidedLicence ? `; in the lowest-cost set via ${record.currentAvoidedLicence.licence.name} (${money(record.currentAvoidedLicence.annual)} / year for the licence)` : '; not selected'}; outside cash`],
+          : `On its own: ${record.currentAvoidedCapability.standaloneLicenceNames.join(' + ') || 'already licensed'} for ${formatNumber(record.currentAvoidedCapability.users)} users, ${money(record.currentAvoidedCapability.standaloneAnnual)} / year${record.currentAvoidedLicence ? `; in the lowest-cost set via ${record.currentAvoidedLicence.licence.name} (${money(record.currentAvoidedLicence.annual)} / year for the licence); counted ${record.currentAvoidedCapability.includedWith?.countedOn ? `with ${record.currentAvoidedCapability.includedWith.countedOn.name}, not again here` : `${money(record.currentAvoidedCapability.countedAnnual)} / year`}` : '; not selected'}; outside cash`],
       ['Seller talk track', category.talkTrack ?? 'No category-specific talk track recorded'],
     ]} />
     <ReviewEvidence title="Category applicability" evidence={record.evidence} />

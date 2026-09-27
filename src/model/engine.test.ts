@@ -659,6 +659,44 @@ describe('capability cost avoidance', () => {
     expect(c.capabilities.find((cap) => cap.category.id === 'genai-assistant')!.coveredByLicenceId).toBe('copilot');
   });
 
+  it('counts a shared licence against one capability and shows the others as included', () => {
+    const c = avoid('m365e5', ['genai-assistant', 'enterprise-search'], {
+      costAvoidance: { users: { 'enterprise-search': 400 }, unitPrices: {} },
+    });
+    const cap = (id: string) => c.capabilities.find((x) => x.category.id === id)!;
+    expect(cap('genai-assistant').countedAnnual).toBeCloseTo(annual(30), 6);
+    expect(cap('genai-assistant').includedWith).toBeUndefined();
+    expect(cap('enterprise-search').countedAnnual).toBe(0);
+    expect(cap('enterprise-search').includedWith).toMatchObject({ licenceId: 'copilot', countedOn: { id: 'genai-assistant' } });
+    expect(c.capabilities.reduce((a, x) => a + x.countedAnnual, 0)).toBeCloseTo(c.annualAvoided, 6);
+  });
+
+  it('shows an unselected capability as adding nothing when a selected licence provides it', () => {
+    const c = avoid('m365e5', ['genai-assistant']);
+    const search = c.capabilities.find((x) => x.category.id === 'enterprise-search')!;
+    expect(search.selected).toBe(false);
+    expect(search.marginalAnnual).toBe(0);
+    expect(search.includedWith).toMatchObject({ licenceId: 'copilot' });
+    expect(search.includedWith?.countedOn).toBeUndefined();
+    const agents = c.capabilities.find((x) => x.category.id === 'agent-governance')!;
+    expect(agents.marginalAnnual).toBeCloseTo(annual(15), 6);
+    expect(agents.includedWith).toBeUndefined();
+
+    const fewer = avoid('m365e5', ['genai-assistant'], { costAvoidance: { users: { 'genai-assistant': 100 }, unitPrices: {} } });
+    const wider = fewer.capabilities.find((x) => x.category.id === 'enterprise-search')!;
+    expect(wider.marginalAnnual).toBeCloseTo(annual(30, 900), 6);
+    expect(wider.includedWith?.licenceId).toBe('copilot');
+  });
+
+  it('attributes every licence, including prerequisites, so the counted shares sum to the total', () => {
+    for (const baseline of ['o365e3', 'm365e3', 'm365e5'] as const) {
+      const c = avoid(baseline, gapIds(baseline));
+      expect(c.capabilities.reduce((a, x) => a + x.countedAnnual, 0)).toBeCloseTo(c.annualAvoided, 6);
+    }
+    const ztna = avoid('o365e3', ['ztna']).capabilities.find((x) => x.category.id === 'ztna')!;
+    expect(ztna.countedAnnual).toBeCloseTo(annual(12 + 7), 6);
+  });
+
   it('switches to a suite when it is cheaper than the individual products', () => {
     const c = avoid('m365e3', ['edr-xdr', 'email-security', 'itdr', 'casb']);
     expect(ids(c)).toEqual(['m365-e5-security']);

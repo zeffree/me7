@@ -13,22 +13,45 @@ const usd = (value: number) => formatCurrency(value, 'USD');
 const pupm = (value: number) => formatPupm(value, 'USD');
 const plural = (n: number, one: string, many: string) => `${n.toLocaleString()} ${n === 1 ? one : many}`;
 
+const ZERO = 0.005;
+
 function describe(cap: AvoidedCapability): string {
   if (!cap.priced) return 'No standalone Microsoft licence is priced for this capability, so it is not valued.';
   if (cap.standaloneAnnual === 0 && cap.ownedVia.length) return `Already licensed through ${cap.ownedVia.join(', ')}. Nothing extra to buy.`;
   const perUser = cap.users > 0 ? cap.standaloneAnnual / cap.users / 12 : 0;
-  return `On its own: ${cap.standaloneLicenceNames.join(' + ')} · ${pupm(perUser)} / user / month`;
+  const alone = `On its own: ${cap.standaloneLicenceNames.join(' + ')} · ${pupm(perUser)} / user / month`;
+  if (cap.includedWith?.countedOn) return `Provided by ${cap.includedWith.licenceName}, already counted with ${cap.includedWith.countedOn.name}, so it is not counted again.`;
+  if (!cap.selected && cap.includedWith) {
+    return cap.marginalAnnual <= ZERO
+      ? `Provided by ${cap.includedWith.licenceName}, which your selection already counts. Selecting it adds nothing.`
+      : `Provided by ${cap.includedWith.licenceName}, already counted; selecting it only adds users. ${alone}`;
+  }
+  return alone;
 }
 
-function CapabilityRow({ cap, lines }: { cap: AvoidedCapability; lines: AvoidedLicence[] }) {
+function Amount({ cap, anySelected }: { cap: AvoidedCapability; anySelected: boolean }) {
+  if (!cap.priced) return null;
+  const [value, label] = cap.selected
+    ? cap.includedWith?.countedOn
+      ? ['Included', `in ${cap.includedWith.licenceName}`]
+      : [usd(cap.countedAnnual), 'USD / year counted']
+    : !anySelected
+      ? [usd(cap.standaloneAnnual), 'USD / year on its own']
+      : cap.includedWith && cap.marginalAnnual <= ZERO
+        ? ['Included', `in ${cap.includedWith.licenceName}`]
+        : [usd(cap.marginalAnnual), 'USD / year to add'];
+  return <p className="avoided-licence-amount"><strong>{value}</strong><small>{label}</small></p>;
+}
+
+function CapabilityRow({ cap, lines, anySelected }: { cap: AvoidedCapability; lines: AvoidedLicence[]; anySelected: boolean }) {
   const s = useAssessment();
   const id = cap.category.id;
   const coveredBy = cap.coveredByLicenceId ? lines.find((l) => l.licence.id === cap.coveredByLicenceId) : undefined;
-  const shared = coveredBy && coveredBy.capabilities.length > 1;
+  const carries = coveredBy && !cap.includedWith && coveredBy.capabilities.length > 1;
   return <div className={`study-line avoided-capability${cap.selected ? '' : ' is-off'}`}>
     <div className="avoided-licence-head">
       <Toggle checked={cap.selected} onChange={() => s.togglePlannedCapability(id)} label={cap.category.name} description={describe(cap)} />
-      {cap.priced && <p className="avoided-licence-amount"><strong>{usd(cap.standaloneAnnual)}</strong><small>USD / year on its own</small></p>}
+      <Amount cap={cap} anySelected={anySelected} />
     </div>
     {cap.selected && cap.priced && <>
       <div className="avoided-capability-edit">
@@ -37,9 +60,7 @@ function CapabilityRow({ cap, lines }: { cap: AvoidedCapability; lines: AvoidedL
           hint={cap.usersOverridden ? 'Your entered number.' : `Default: all ${cap.defaultUsers.toLocaleString()} seats.`} />
         {cap.usersOverridden && <Button variant="ghost" size="sm" onClick={() => s.setCapabilityUsers(id, undefined)}>Restore all {cap.defaultUsers.toLocaleString()} seats</Button>}
       </div>
-      {coveredBy && <p>{shared
-        ? `Provided with ${coveredBy.capabilities.length - 1} other selected ${coveredBy.capabilities.length === 2 ? 'capability' : 'capabilities'} by ${coveredBy.licence.name}, so that licence is counted once below.`
-        : `Provided by ${coveredBy.licence.name} in the licences below.`}</p>}
+      {carries && <p>Carries the cost of {coveredBy.licence.name}, which also provides {plural(coveredBy.capabilities.length - 1, 'other selected capability', 'other selected capabilities')}. The licence is counted once.</p>}
       {cap.cashOverlap.length > 0 && <Note tone="warning">Your {cap.cashOverlap.map((o) => o.vendor).join(', ')} spend for this capability is already a cash saving of {usd(cap.cashOverlap.reduce((a, o) => a + o.annualCredit, 0))} / year. It is still shown here as avoided licence cost, but never add the two together.</Note>}
     </>}
   </div>;
@@ -87,6 +108,7 @@ export function CostAvoidancePanel({ result, currency }: { result: EngineResult;
   const pricedIds = c.capabilities.filter((cap) => cap.priced).map((cap) => cap.category.id);
   const selected = c.capabilities.filter((cap) => cap.selected && cap.priced);
   const sharingSaves = Math.max(0, c.standaloneSumAnnual - c.annualAvoided);
+  const includedCount = selected.filter((cap) => cap.includedWith?.countedOn).length;
   const edited = Object.keys(s.costAvoidance.users).length + Object.keys(s.costAvoidance.unitPrices).length > 0;
   const groups = DOMAINS
     .map((domain) => ({ domain, caps: c.capabilities.filter((cap) => cap.category.domain === domain.id) }))
@@ -100,7 +122,9 @@ export function CostAvoidancePanel({ result, currency }: { result: EngineResult;
     {selected.length > 0
       ? <dl className="outcome-details avoidance-summary">
         <div><dt>Cost avoided</dt><dd>{usd(c.annualAvoided)}</dd><small>USD / year for {plural(selected.length, 'selected capability', 'selected capabilities')}, licensed at the lowest cost</small></div>
-        <div><dt>Each licensed on its own</dt><dd>{usd(c.standaloneSumAnnual)}</dd><small>{sharingSaves > 0 ? `USD / year. Shared licences cover several capabilities, which saves ${usd(sharingSaves)} of that.` : 'USD / year. No licence is shared between the selected capabilities.'}</small></div>
+        <div><dt>Counted once</dt><dd>{plural(c.lines.length, 'licence', 'licences')}</dd><small>{sharingSaves > ZERO
+          ? `for ${plural(selected.length, 'selected capability', 'selected capabilities')}. ${includedCount ? `${includedCount.toLocaleString()} ${includedCount === 1 ? 'is' : 'are'} included in a licence already counted, which` : 'Sharing licences'} keeps ${usd(sharingSaves)} / year of double counting out.`
+          : `for ${plural(selected.length, 'selected capability', 'selected capabilities')}. No licence is shared.`}</small></div>
         {comparable
           ? <div><dt>Buy separately vs E7</dt><dd>{c.bundleDifferenceAnnual === 0 ? 'No difference' : `E7 ${usd(Math.abs(c.bundleDifferenceAnnual))} ${c.bundleDifferenceAnnual > 0 ? 'lower' : 'higher'}`}</dd><small>USD / year: your current licences plus these, against E7, before any third-party retirement.</small></div>
           : <div><dt>Buy separately vs E7</dt><dd>Withheld</dd><small>Your assessment is {currency}; licence references are USD and no FX conversion is applied.</small></div>}
@@ -115,10 +139,12 @@ export function CostAvoidancePanel({ result, currency }: { result: EngineResult;
         {edited && <Button variant="ghost" size="sm" onClick={s.resetCostAvoidance}>Restore default users and prices</Button>}
       </div>
     </div>
-    <p className="detail-copy">The amount beside each is the cheapest way to license that capability alone. Microsoft add-ons you already buy are not counted again.</p>
+    <p className="detail-copy">{selected.length
+      ? 'Selected capabilities show their share of the cost avoided, with each licence counted once. The others show what selecting them would add — nothing when a licence you have already selected provides them.'
+      : 'The amount beside each is the cheapest way to license that capability alone.'} Microsoft add-ons you already buy are not counted again.</p>
     {groups.map(({ domain, caps }) => <div className="capability-group" key={domain.id}>
       <h4>{domain.name}</h4>
-      {caps.map((cap) => <CapabilityRow key={cap.category.id} cap={cap} lines={c.lines} />)}
+      {caps.map((cap) => <CapabilityRow key={cap.category.id} cap={cap} lines={c.lines} anySelected={selected.length > 0} />)}
     </div>)}
     {!groups.length && <p className="note" style={{ marginTop: 14 }}>No capability gap remains between {baseline.name} and E7 in this scenario.</p>}
 

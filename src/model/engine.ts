@@ -360,6 +360,8 @@ export function computeCostAvoidance(
       standaloneLicenceIds: alone.lines.map((l) => l.id),
       standaloneLicenceNames: alone.lines.map((l) => byId.get(l.id)!.licence.name),
       standaloneAnnual: isPriced ? alone.annual : 0,
+      countedAnnual: 0,
+      marginalAnnual: 0,
       ownedVia: [...new Set(ownedVia)],
       thirdPartyReferencePupm: benchmark,
       thirdPartyReferenceAnnual: benchmark * users * 12,
@@ -395,11 +397,34 @@ export function computeCostAvoidance(
       cashOverlap: cashOverlapFor(new Set(line.capabilityIds)),
     };
   });
+  // Count each licence once: its cost sits with the selected capability needing it for the most
+  // users, the rest are shown as included with it, and a prerequisite follows its dependent licence.
+  const capById = new Map(capabilities.map((c) => [c.category.id, c]));
+  const primaryOf = new Map<string, AvoidedCapability>();
   for (const line of lines) {
-    for (const cat of line.capabilities) {
-      const cap = capabilities.find((c) => c.category.id === cat.id);
-      if (cap) cap.coveredByLicenceId = line.licence.id;
+    const caps = line.capabilities.map((cat) => capById.get(cat.id)!);
+    const primary = caps.reduce<AvoidedCapability | undefined>((best, cap) => (!best || cap.users > best.users ? cap : best), undefined);
+    if (!primary) continue;
+    primaryOf.set(line.licence.id, primary);
+    for (const cap of caps) {
+      cap.coveredByLicenceId = line.licence.id;
+      if (cap !== primary) cap.includedWith = { licenceId: line.licence.id, licenceName: line.licence.name, countedOn: primary.category };
     }
+  }
+  for (const line of lines) {
+    const owner = primaryOf.get(line.licence.id) ??
+      line.prerequisiteFor.map((l) => primaryOf.get(l.id)).find(Boolean) ?? counted[0];
+    if (owner) owner.countedAnnual += line.annual;
+  }
+  const inSet = new Set(combined.lines.map((l) => l.id));
+  for (const cap of capabilities) {
+    if (cap.selected) { cap.marginalAnnual = cap.countedAnnual; continue; }
+    if (!cap.priced) continue;
+    if (!counted.length) { cap.marginalAnnual = cap.standaloneAnnual; continue; }
+    const withIt = cheapestCover([...counted, cap].map((c) => ({ id: c.category.id, users: c.users })), candidates);
+    cap.marginalAnnual = Math.max(0, withIt.annual - combined.annual);
+    const via = withIt.lines.find((l) => l.capabilityIds.includes(cap.category.id) && inSet.has(l.id));
+    if (via) cap.includedWith = { licenceId: via.id, licenceName: byId.get(via.id)!.licence.name };
   }
 
   const annualAvoided = combined.annual;

@@ -240,6 +240,16 @@ export interface AvoidedCapability {
   ownedVia: string[];
   /** When selected, the licence in the combined set credited with it. */
   coveredByLicenceId?: string;
+  /**
+   * Its share of annualAvoided, counting each licence once: a licence's cost sits with the selected
+   * capability that needs it for the most users, and its prerequisites follow it. Zero when not
+   * selected. Summed over the capabilities this equals annualAvoided exactly.
+   */
+  countedAnnual: number;
+  /** Not selected: what adding it to the current selection would add. Selected: countedAnnual. */
+  marginalAnnual: number;
+  /** A licence already counted for the selection also provides this capability. */
+  includedWith?: { licenceId: string; licenceName: string; countedOn?: Category };
   /** Illustrative third-party category benchmark for the same users. Context only. */
   thirdPartyReferencePupm: number;
   thirdPartyReferenceAnnual: number;
