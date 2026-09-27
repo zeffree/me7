@@ -8,15 +8,12 @@ import { AddOnsStep } from '@/components/steps/AddOnsStep';
 import { AssumptionsStep } from '@/components/steps/AssumptionsStep';
 import { ResultsStep } from '@/components/steps/ResultsStep';
 import { LegacyCurrencyNotice } from '@/components/steps/LegacyCurrencyNotice';
-import { ExperienceBoundary } from '@/components/experience/ExperienceBoundary';
 import { useAssessment } from '@/store/useAssessment';
 import { loadSharedAssessment } from '@/components/layout/loadSharedAssessment';
 import { APP_ROUTES, readAppRoute, type AppPage } from '@/components/layout/appRoute';
 
 const STEPS = { profile: ProfileStep, quick: CatalogStep, catalog: CatalogStep, addons: AddOnsStep, assumptions: AssumptionsStep, results: ResultsStep } as const;
 const AuditPage = lazy(() => import('@/components/audit/AuditPage').then(module => ({ default: module.AuditPage })));
-const ArchitecturePage = lazy(() => import('@/components/architecture/ArchitecturePage').then(module => ({ default: module.ArchitecturePage })));
-const ExperiencePage = lazy(() => import('@/components/experience/ExperiencePage').then(module => ({ default: module.ExperiencePage })));
 const CONTRACT = '<!-- THESIS: A decision folio, not a savings pitch. OWN-WORLD: Cool white working sheets, slate financial ledger, cobalt controls, yellow evidence notes, Public Sans. STORY: Capture invoices, test cancellation assumptions, compare cash, inspect evidence. FIRST VIEWPORT: The task and start action at left; a worked current/future folio at right; no unqualified savings claim. FORM: Procurement comparison docket, grounded candidate 4, fixed folio index and focused working sheet; seed 3f9ecc77. -->';
 
 export default function App() {
@@ -34,7 +31,7 @@ export default function App() {
       if (lastLocationRead.current === window.location.href) return;
       lastLocationRead.current = window.location.href;
       const nextPage = readAppRoute(window.location.hash);
-      if (nextPage === 'audit' || nextPage === 'architecture' || nextPage === 'experience') {
+      if (nextPage === 'audit') {
         setPage(nextPage);
         return;
       }
@@ -88,7 +85,7 @@ export default function App() {
     if (page !== 'assessment') window.location.hash = APP_ROUTES.assessment.href;
   }}>
     <div hidden dangerouslySetInnerHTML={{ __html: CONTRACT }} />
-    {page === 'experience' ? <ExperienceBoundary><Suspense fallback={<p className="audit-page" role="status">Opening the E7 workplace...</p>}><ExperiencePage /></Suspense></ExperienceBoundary> : page === 'architecture' ? <Suspense fallback={<p className="audit-page" role="status">Loading E7 in action...</p>}><ArchitecturePage onBack={resumeAssessment} /></Suspense> : page === 'audit' ? <Suspense fallback={<p className="audit-page" role="status">Loading audit reference...</p>}><AuditPage onBack={() => { window.location.hash = APP_ROUTES.assessment.href; }} /></Suspense> : currency !== 'USD' ? <LegacyCurrencyNotice onStart={() => setHome(false)} /> : isLanding ? <>{flash && <div className="flash no-print" role="status"><span>{flash}</span><button onClick={() => setFlash(null)}>Dismiss</button></div>}<Landing onResume={() => setHome(false)} /></> : <>
+    {page === 'audit' ? <Suspense fallback={<p className="audit-page" role="status">Loading audit reference...</p>}><AuditPage onBack={() => { window.location.hash = APP_ROUTES.assessment.href; }} /></Suspense> : currency !== 'USD' ? <LegacyCurrencyNotice onStart={() => setHome(false)} /> : isLanding ? <>{flash && <div className="flash no-print" role="status"><span>{flash}</span><button onClick={() => setFlash(null)}>Dismiss</button></div>}<Landing onResume={() => setHome(false)} /></> : <>
       <Stepper />
       <div className={`workspace ${step === 'results' ? 'results-workspace' : ''}`}>
         {step !== 'results' && <MobileSummary />}

@@ -10,7 +10,6 @@ import { DISCOVERY_QUESTIONS, findBattlecards, OBJECTIONS, type DealContext } fr
 import { DOMAINS } from '@/data/categories';
 import { E7_SKU, getBaseline } from '@/data/skus';
 import { CostComparisonBars } from './CostComparisonBars';
-import { APP_ROUTES } from '@/components/layout/appRoute';
 
 export function PresenterContent({ assessment, result }: { assessment: Assessment; result: EngineResult }) {
   const [message, setMessage] = useState('');
@@ -52,7 +51,6 @@ export function PresenterContent({ assessment, result }: { assessment: Assessmen
         <div className="suite-foundation"><h4>Microsoft 365 E5 foundation</h4><p>Productivity, advanced security and compliance. {assessment.baseline === 'm365e5' ? 'Already part of the current baseline; do not sell it as new.' : 'Compare the higher-tier controls with the workflows and tools in use today.'}</p></div>
         <dl>{E7_SKU.deltaOverE5.map(component => <div key={component.name}><dt>{component.name}</dt><dd>{component.name === 'Microsoft 365 Copilot' ? 'Ground assistance in work data and bring it into the applications employees already use. Demonstrate one repeatable job, not a generic chat demo.' : component.name === 'Agent 365' ? 'Give the agent rollout an identity, policy and oversight plan. Governance is not a substitute for separately priced agent execution.' : 'Connect workforce access and identity lifecycle decisions. Demonstrate the required private access, internet access and governance paths.'}</dd></div>)}</dl>
       </div>
-      <p className="architecture-entry no-print"><a href={APP_ROUTES.architecture.href}>Explore the interactive E7 architecture<ArrowRight aria-hidden="true" /></a></p>
     </section>
     <section className="presenter-section">
       <h3>Start with the invoices that matter most</h3>

@@ -28,7 +28,7 @@ beforeEach(() => {
 });
 
 describe('page-specific application shell', () => {
-  it.each<AppPage>(['assessment', 'audit', 'architecture', 'experience'])('keeps global navigation and disclaimer in %s', page => {
+  it.each<AppPage>(['assessment', 'audit'])('keeps global navigation and disclaimer in %s', page => {
     const html = renderShell(page);
     expect(html).toContain(`href="#${APP_ROUTES[page].mainId}"`);
     expect(html).toContain(`<main id="${APP_ROUTES[page].mainId}" tabindex="-1">Page content</main>`);
@@ -61,13 +61,8 @@ describe('page-specific application shell', () => {
     expect(renderShell(page)).not.toContain('aria-label="Start a new assessment"');
   });
 
-  it.each<AppPage>(['architecture', 'experience'])('hides assessment-only controls, storage failures and workspace disclosures in %s', page => {
-    state.storageError = 'This assessment could not be saved.';
-    const html = renderShell(page);
-    for (const text of [
-      'save-status', 'Local browser workspace', 'Toggle presenter guidance',
-      'Start a new assessment', 'role="alert"', state.storageError,
-      'Local storage can be unavailable or cleared', 'Shared links contain your inputs',
-    ]) expect(html).not.toContain(text);
+  it('offers no links to the retired Experience E7 or E7 in action pages', () => {
+    const html = renderShell('assessment');
+    for (const text of ['Experience E7', 'E7 in action', '#experience', '#architecture']) expect(html).not.toContain(text);
   });
 });

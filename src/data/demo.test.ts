@@ -8,10 +8,10 @@ describe('shared illustrative business case', () => {
     const assessment = createDemoAssessment();
     const result = computeAssessment(assessment);
     expect(result.baselineAnnual).toBe(468_000);
-    expect(result.currentAnnualTotal).toBe(1_797_600);
+    expect(result.currentAnnualTotal).toBe(1_701_600);
     expect(result.e7Annual).toBe(1_188_000);
     expect(result.totalAnnualSavings).toBe(1_173_600);
-    expect(result.futureAnnualTotal).toBe(1_344_000);
+    expect(result.futureAnnualTotal).toBe(1_248_000);
     expect(result.recurringAnnualBenefit).toBe(453_600);
     expect(result.year1NetBenefit).toBe(168_000);
     expect(result.tcoNetBenefit).toBe(1_075_200);
@@ -20,7 +20,7 @@ describe('shared illustrative business case', () => {
     expect(result.monthlyCashflow[2].cashSavings).toBe(0);
     expect(result.monthlyCashflow[3].cashSavings).toBe(97_800);
     expect(result.scoredLines.filter(line => !line.eligible).map(line => line.category.id))
-      .toEqual(['siem-soar', 'saas-backup', 'esignature']);
+      .toEqual(['saas-backup', 'esignature']);
     expect(assessment.tei.enabled).toBe(false);
     expect(assessment.plannedCapabilities).toEqual([]);
   });

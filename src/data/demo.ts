@@ -41,7 +41,6 @@ export function createDemoAssessment(): Assessment {
       invoice('edr-xdr', 'CrowdStrike Falcon', 120_000),
       invoice('dlp', 'Broadcom Symantec DLP', 96_000),
       invoice('email-security', 'Proofpoint Email Security', 72_000),
-      invoice('siem-soar', 'Splunk SIEM', 96_000),
       invoice('saas-backup', 'Veeam Backup for Microsoft 365', 36_000),
       invoice('esignature', 'DocuSign', 24_000),
     ],

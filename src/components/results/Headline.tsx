@@ -2,29 +2,58 @@ import type { EngineResult } from '@/model/types';
 import { formatCurrency, formatPupm } from '@/lib/format';
 import { useAssessment } from '@/store/useAssessment';
 import { getBaseline } from '@/data/skus';
+import { Sparkles } from 'lucide-react';
+import { VerdictHero } from './VerdictHero';
+import { MetricTiles } from './MetricTiles';
+import { WhatWouldChange } from './WhatWouldChange';
+import { CountUp } from './CountUp';
+
+type Segment = { key: string; label: string; amount: number };
+
+function Column({ title, total, unit, segments, scale, currency }: { title: string; total: number; unit: string; segments: Segment[]; scale: number; currency: string }) {
+  const money = (value: number) => formatCurrency(value, currency);
+  return <section className="comparison-column">
+    <h2>{title}</h2>
+    <p className="money"><CountUp value={total} format={money} /></p>
+    <small>{unit}</small>
+    <div className="composition" aria-hidden="true">
+      {segments.filter(segment => segment.amount > 0).map(segment => <span key={segment.key} data-seg={segment.key} style={{ width: `${segment.amount / scale * 100}%` }} />)}
+    </div>
+    <div className="comparison-lines">
+      {segments.map(segment => <div key={segment.key}><span><i className="seg-dot" data-seg={segment.key} aria-hidden="true" />{segment.label}</span><strong>{money(segment.amount)}</strong></div>)}
+    </div>
+  </section>;
+}
 
 export function Headline({ result: r, currency }: { result: EngineResult; currency: string }) {
   const s = useAssessment();
-  const label = r.netAnnualConservative > 0 ? 'Lower recurring cost' : r.netAnnualConservative < 0 ? 'Higher recurring cost' : 'No recurring cost difference';
-  const payback = r.paybackStatus === 'reached' ? `Month ${r.paybackMonths}` : r.paybackStatus === 'no-investment' ? 'No initial investment' : r.paybackStatus === 'break-even' ? 'Break-even' : `Not reached in ${s.assumptions.horizonYears} years`;
+  const scale = Math.max(1, r.currentAnnualTotal, r.futureAnnualTotal);
+  const baseline = getBaseline(s.baseline);
   return <>
+    <VerdictHero result={r} currency={currency} orgName={s.orgName} />
+    <MetricTiles result={r} currency={currency} horizonYears={s.assumptions.horizonYears} transitionEnabled={s.assumptions.transitionEnabled === true} entries={s.lines.length + s.addOns.length} />
+    {r.netAnnualConservative <= 0 && <WhatWouldChange result={r} currency={currency} />}
     <div className="result-comparison">
-      <section className="comparison-column"><h2>Stay as entered</h2><p className="money">{formatCurrency(r.currentAnnualTotal, currency)}</p><small>{currency} / year · captured current spend</small><div className="comparison-lines">
-        <div><span>Baseline suite</span><strong>{formatCurrency(r.baselineAnnual, currency)}</strong></div><div><span>Microsoft add-ons</span><strong>{formatCurrency(r.addOnAnnualTotal, currency)}</strong></div><div><span>Third-party tools</span><strong>{formatCurrency(r.thirdPartyAnnual, currency)}</strong></div>
-      </div></section>
-      <section className="comparison-column"><h2>Move to E7</h2><p className="money">{formatCurrency(r.futureAnnualTotal, currency)}</p><small>{currency} / year · steady-state estimate</small><div className="comparison-lines">
-        <div><span>E7 licences</span><strong>{formatCurrency(r.e7Annual, currency)}</strong></div><div><span>Retained Microsoft add-ons</span><strong>{formatCurrency(r.addOnAnnualRetained, currency)}</strong></div><div><span>Retained third-party spend</span><strong>{formatCurrency(r.thirdPartyAnnual - r.thirdPartyCreditConservative, currency)}</strong></div>
-      </div></section>
+      <Column title="Stay as entered" total={r.currentAnnualTotal} unit={`${currency} / year · captured current spend`} scale={scale} currency={currency} segments={[
+        { key: 'suite', label: 'Baseline suite', amount: r.baselineAnnual },
+        { key: 'addon', label: 'Microsoft add-ons', amount: r.addOnAnnualTotal },
+        { key: 'third', label: 'Third-party tools', amount: r.thirdPartyAnnual },
+      ]} />
+      <Column title="Move to E7" total={r.futureAnnualTotal} unit={`${currency} / year · steady-state estimate`} scale={scale} currency={currency} segments={[
+        { key: 'e7', label: 'E7 licences', amount: r.e7Annual },
+        { key: 'addon', label: 'Retained Microsoft add-ons', amount: r.addOnAnnualRetained },
+        { key: 'third', label: 'Retained third-party spend', amount: r.thirdPartyAnnual - r.thirdPartyCreditConservative },
+      ]} />
     </div>
-    <div className="net-strip"><div><strong>{label}</strong><p>{r.netAnnualConservative > 0 ? 'Only eligible retirement assumptions reduce this figure.' : r.netAnnualConservative < 0 ? 'The entered savings do not cover the additional licence cost.' : 'Current and future recurring totals are equal under these inputs.'}</p></div><span className={`money ${r.netAnnualConservative < 0 ? 'negative' : ''}`}>{formatCurrency(Math.abs(r.netAnnualConservative), currency)}<small style={{ fontSize: '.75rem', fontWeight: 400 }}> / year</small></span></div>
-    <dl className="outcome-details">
-      <div><dt>Year-one cash impact</dt><dd className={r.year1NetBenefit < 0 ? 'negative' : ''}>{r.year1NetBenefit === 0 ? 'No cost difference' : `${formatCurrency(Math.abs(r.year1NetBenefit), currency)} ${r.year1NetBenefit < 0 ? 'more' : 'less'}`}</dd><small>{s.assumptions.transitionEnabled ? 'Includes the one-time cost and entered savings delays.' : 'Immediate savings; no transition cost entered.'}</small></div>
-      <div><dt>{s.assumptions.horizonYears}-year cumulative impact</dt><dd>{r.tcoNetBenefit === 0 ? 'No cost difference' : `${formatCurrency(Math.abs(r.tcoNetBenefit), currency)} ${r.tcoNetBenefit < 0 ? 'more' : 'less'}`}</dd><small>Difference between current-state and move-to-E7 TCO.</small></div>
-      <div><dt>Cash payback</dt><dd>{payback}</dd><small>{r.paybackStatus === 'cost-increase' ? 'This scenario remains a cost increase over the horizon.' : 'Calculated from the same monthly cash-flow schedule.'}</small></div>
-    </dl>
-    {r.costAvoidance.capabilities.length > 0 && (r.costAvoidance.annualAvoided > 0
-      ? <div className="avoidance-strip"><div><strong>Capability cost avoided with E7 · separate lens</strong><p>What licensing the {r.costAvoidance.selectedCount === 1 ? 'capability' : `${r.costAvoidance.selectedCount} capabilities`} you plan to deploy separately from Microsoft would cost on top of {getBaseline(s.baseline).shortName}. E7 already includes {r.costAvoidance.selectedCount === 1 ? 'it' : 'them'}. Not an invoice you stop paying: excluded from net impact, TCO and payback. <a href="#licence-cost-avoidance">See the capabilities</a></p></div><span className="money">{formatCurrency(r.costAvoidance.annualAvoided, 'USD')}<small> USD / year</small></span></div>
-      : <div className="avoidance-strip"><div><strong>Capability cost avoided with E7 · separate lens</strong><p>E7 includes capabilities {getBaseline(s.baseline).shortName} does not. Choose the ones you plan to deploy to see what licensing them separately would cost. <a href="#licence-cost-avoidance">Choose capabilities</a></p></div></div>)}
+    {r.costAvoidance.capabilities.length > 0 && <div className="avoidance-strip">
+      <span className="avoidance-strip-icon" aria-hidden="true"><Sparkles /></span>
+      <div><strong>Capability cost avoided with E7 <span className="lens-badge">Separate lens</span></strong>
+        {r.costAvoidance.annualAvoided > 0
+          ? <p>What licensing the {r.costAvoidance.selectedCount === 1 ? 'capability' : `${r.costAvoidance.selectedCount} capabilities`} you plan to deploy separately would cost on top of {baseline.shortName}. Not an invoice you stop paying, so it is excluded from net impact, TCO and payback. <a href="#licence-cost-avoidance">See the capabilities</a></p>
+          : <p>E7 includes capabilities {baseline.shortName} does not. Choose the ones you plan to deploy to see what licensing them separately would cost. <a href="#licence-cost-avoidance">Choose capabilities</a></p>}
+      </div>
+      {r.costAvoidance.annualAvoided > 0 && <span className="money"><CountUp value={r.costAvoidance.annualAvoided} format={v => formatCurrency(v, 'USD')} /><small> USD / year</small></span>}
+    </div>}
     <details className="disclosure"><summary>Licence price versus savings-offset comparison</summary><div className="detail-copy"><p>The E7 licence amount used is <strong>{formatPupm(r.e7NetPupm, currency)} / user / month</strong>. Subtracting eligible retirement credit across {r.seats.toLocaleString()} seats produces an offset-adjusted comparison of <strong>{formatPupm(r.effectiveNetPupmConservative, currency)} / user / month</strong>.</p><p>This is not Microsoft’s invoice price. A negative offset-adjusted figure is not a refund or a negative licence bill.</p></div></details>
   </>;
 }

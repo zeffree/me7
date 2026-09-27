@@ -26,9 +26,9 @@ describe('playful, truthful assessment UI', () => {
     expect(result).toEqual(before);
     expect(html).toContain('Current stack');
     expect(html).toContain('With E7');
-    expect(html).toContain('$1,797,600');
-    expect(html).toContain('$1,344,000');
-    expect(html).toContain('$156,000');
+    expect(html).toContain('$1,701,600');
+    expect(html).toContain('$1,248,000');
+    expect(html).toContain('$60,000');
     expect(html).toContain('Specialist services stay separate');
     expect(html).toContain('role="status"');
     expect(html).toContain('aria-pressed="true"');
@@ -37,7 +37,7 @@ describe('playful, truthful assessment UI', () => {
 
   it('does not invent pieces for zero retirement credit', () => {
     const assessment = createDemoAssessment();
-    assessment.lines = assessment.lines.filter(line => line.categoryId === 'siem-soar');
+    assessment.lines = assessment.lines.filter(line => line.categoryId === 'saas-backup');
     assessment.addOns = [];
     expect(stackPieces(computeAssessment(assessment))).toEqual([]);
   });

@@ -9,15 +9,11 @@ describe('application page routes', () => {
     ['#main-content', 'assessment'],
     ['#audit', 'audit'],
     ['#audit-main-content', 'audit'],
-    ['#architecture', 'architecture'],
-    ['#architecture-main-content', 'architecture'],
-    ['#experience', 'experience'],
-    ['#experience-main-content', 'experience'],
   ])('recognizes %s as %s', (hash, page) => {
     expect(readAppRoute(hash)).toBe(page);
   });
 
-  it.each<AppPage>(['assessment', 'audit', 'architecture', 'experience'])('keeps %s mounted when its skip link changes the hash', page => {
+  it.each<AppPage>(['assessment', 'audit'])('keeps %s mounted when its skip link changes the hash', page => {
     const route = APP_ROUTES[page];
     expect(readAppRoute(route.href)).toBe(page);
     expect(readAppRoute(`#${route.mainId}`)).toBe(page);
@@ -25,6 +21,9 @@ describe('application page routes', () => {
 
   it.each([
     '#d=compressed-assessment',
+    '#architecture',
+    '#experience',
+    '#experience-main-content',
     '#d=architecture',
     '#d=abc%2Bdef&section=architecture',
     '#architecture&d=compressed-assessment',
@@ -51,15 +50,9 @@ describe('application page routes', () => {
     expect(url.searchParams.get('d')).toBe('legacy-assessment');
   });
 
-  it('recognizes a cold architecture URL without changing its query payload', () => {
+  it('no longer routes the retired architecture and experience pages', () => {
     const url = new URL('https://example.com/?d=legacy-assessment#architecture');
-    expect(readAppRoute(url.hash)).toBe('architecture');
-    expect(url.searchParams.get('d')).toBe('legacy-assessment');
-  });
-
-  it('recognizes a cold experience URL without consuming an assessment query payload', () => {
-    const url = new URL('https://example.com/?d=legacy-assessment#experience');
-    expect(readAppRoute(url.hash)).toBe('experience');
+    expect(readAppRoute(url.hash)).toBeNull();
     expect(url.searchParams.get('d')).toBe('legacy-assessment');
   });
 });

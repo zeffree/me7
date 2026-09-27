@@ -50,7 +50,7 @@ describe('simplified assessment entry', () => {
     }
     expect(html).toContain(`Month ${result.paybackMonths}`);
     expect(html).toContain('Synthetic USD inputs');
-    expect(html).toContain('SIEM, backup and e-signature stay paid');
+    expect(html).toContain('Backup and e-signature stay paid');
   });
 
   it('gives category notes a workflow, capability route and acceptance-test prompt', () => {

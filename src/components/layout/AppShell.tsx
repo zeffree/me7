@@ -20,7 +20,6 @@ export function AppShell({ children, onHome, onAssessment, page = 'assessment' }
   const state = useAssessment();
   const storageError = 'storageError' in state && typeof state.storageError === 'string' ? state.storageError : null;
   const assessmentMode = page === 'assessment';
-  const showAssessmentControls = page !== 'architecture' && page !== 'experience';
   const { mainId } = APP_ROUTES[page];
   return <div className="app-shell">
     <a href={`#${mainId}`} className="skip-link">Skip to main content</a>
@@ -33,23 +32,21 @@ export function AppShell({ children, onHome, onAssessment, page = 'assessment' }
             event.preventDefault();
             onAssessment();
           }} aria-current={assessmentMode ? 'page' : undefined}>Assessment</a>
-          <a href={APP_ROUTES.experience.href} aria-current={page === 'experience' ? 'page' : undefined}>Experience E7</a>
-          <a href={APP_ROUTES.architecture.href} aria-current={page === 'architecture' ? 'page' : undefined}>E7 in action</a>
         </nav>
         <div className="header-actions">
-          {showAssessmentControls && <span className={`save-status ${storageError ? 'error' : ''}`}>{storageError ? 'Not saved · export a copy' : 'Local browser workspace'}</span>}
-          {showAssessmentControls && <Button variant="ghost" size="sm" className={state.sellerMode ? 'active' : ''} aria-pressed={state.sellerMode} aria-label="Toggle presenter guidance" onClick={state.toggleSellerMode}><Presentation /><span className="header-action-label">Presenter</span></Button>}
-          {showAssessmentControls && state.started && <Button variant="ghost" className="icon-button" aria-label="Start a new assessment" onClick={() => {
+          <span className={`save-status ${storageError ? 'error' : ''}`}>{storageError ? 'Not saved · export a copy' : 'Local browser workspace'}</span>
+          <Button variant="ghost" size="sm" className={state.sellerMode ? 'active' : ''} aria-pressed={state.sellerMode} aria-label="Toggle presenter guidance" onClick={state.toggleSellerMode}><Presentation /><span className="header-action-label">Presenter</span></Button>
+          {state.started && <Button variant="ghost" className="icon-button" aria-label="Start a new assessment" onClick={() => {
             if (window.confirm('Clear this assessment and start again? Export a JSON copy first if you want to keep it.')) { state.reset(); onHome(); }
           }}><RotateCcw /></Button>}
           <Button variant="ghost" className="icon-button" onClick={state.toggleTheme} aria-label={`Use ${state.theme === 'dark' ? 'light' : 'dark'} theme`}>{state.theme === 'dark' ? <Sun /> : <Moon />}</Button>
         </div>
       </div>
     </header>
-    {showAssessmentControls && storageError && <div className="flash no-print" role="alert">{storageError}</div>}
+    {storageError && <div className="flash no-print" role="alert">{storageError}</div>}
     <main id={mainId} tabIndex={-1}>{children}</main>
     <footer className="site-footer">
-      {showAssessmentControls && <p className="no-print">Assessment calculations run in your browser. Local storage can be unavailable or cleared. Export a JSON copy to keep your work. Shared links contain your inputs and are not encrypted.</p>}
+      <p className="no-print">Assessment calculations run in your browser. Local storage can be unavailable or cleared. Export a JSON copy to keep your work. Shared links contain your inputs and are not encrypted.</p>
       <p>Estimates only — not an official Microsoft quote. This is a personal project by Zeffree Kan, not affiliated with, endorsed by, or an official tool of Microsoft. Feedback: <a href="mailto:zeffree@live.com?subject=M365%20E7%20assessment%20feedback">zeffree@live.com</a>.</p>
       <p className="no-print"><a href={APP_ROUTES.audit.href} aria-current={page === 'audit' ? 'page' : undefined}>Audit &amp; review reference</a></p>
     </footer>

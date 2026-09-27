@@ -328,7 +328,7 @@ describe('planned capabilities', () => {
       expect(a.baseline).toBe('m365e3');
       expect(a.currency).toBe('USD');
       expect(a.isDemo).toBe(true);
-      expect(a.lines).toHaveLength(12);
+      expect(a.lines).toHaveLength(11);
       expect(a.addOns).toHaveLength(1);
       expect([...a.lines, ...a.addOns].every((line) =>
         line.amountSource === 'benchmark' && !line.assumptionConfirmed)).toBe(true);

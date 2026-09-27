@@ -6,7 +6,6 @@ import { createDemoAssessment, DEMO_STORY } from '@/data/demo';
 import { computeAssessment } from '@/model/engine';
 import { formatCurrency } from '@/lib/format';
 import { StackPlayground } from './StackPlayground';
-import { APP_ROUTES } from '@/components/layout/appRoute';
 
 const demo = createDemoAssessment();
 const example = computeAssessment(demo);
@@ -28,14 +27,6 @@ export function Landing({ onResume }: { onResume: () => void }) {
           }}>Explore an example</Button>
         </div>
         <p className="landing-small">A few numbers. A clearer picture.<br />Start with what you know — fill in the gaps as you go.</p>
-        <div className="architecture-entry">
-          <a href={APP_ROUTES.experience.href}>Step into the E7 workplace<ArrowRight aria-hidden="true" /></a>
-          <p>Eight hands-on missions. Try the same task with O365 E3 and E7, rewind your choices, and discover what changes. No assessment needed.</p>
-        </div>
-        <div className="architecture-entry">
-          <a href={APP_ROUTES.architecture.href}>See E7 in action<ArrowRight aria-hidden="true" /></a>
-          <p>Explore how identity, security and AI work together in an illustrative architecture. No assessment needed.</p>
-        </div>
         <div className="section-block">
           <ImportButton label="Restore a saved assessment" onImported={onResume} />
         </div>
@@ -49,7 +40,7 @@ export function Landing({ onResume }: { onResume: () => void }) {
           <div className="example-row"><span>{demo.assumptions.horizonYears}-year net cash benefit</span><strong>{money(example.tcoNetBenefit)}</strong></div>
           <div className="example-row"><span>Modeled payback</span><strong>Month {example.paybackMonths}</strong></div>
         </div>
-        <p className="folio-footnote"><strong>Built from a scenario, not a sales claim.</strong> Synthetic USD inputs assume full replacement of {example.scoredLines.filter(line => line.annualCredit > 0).length + example.scoredAddOns.filter(line => line.annualCredit > 0).length} paid tools, {money(example.migrationTotal)} transition cost and two months before retirement savings. SIEM, backup and e-signature stay paid. Explore the example to see every amount.</p>
+        <p className="folio-footnote"><strong>Built from a scenario, not a sales claim.</strong> Synthetic USD inputs assume full replacement of {example.scoredLines.filter(line => line.annualCredit > 0).length + example.scoredAddOns.filter(line => line.annualCredit > 0).length} paid tools, {money(example.migrationTotal)} transition cost and two months before retirement savings. Backup and e-signature stay paid. Explore the example to see every amount.</p>
       </section>
     </div>
     <div className="landing-path">

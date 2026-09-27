@@ -14,7 +14,7 @@ describe('presenter decision narrative', () => {
     expect(story.retirementCandidates.reduce((sum, item) => sum + item.annualCredit, 0)).toBe(1_173_600);
     expect(story.retirementCandidates[0].name).toBe('ChatGPT Enterprise');
     expect(story.baselineOpportunity).toBe(96_000);
-    expect(story.retainedAnnual).toBe(156_000);
+    expect(story.retainedAnnual).toBe(60_000);
     expect(story.firstSavingsMonth).toBe(3);
     expect(story.summary).toContain('Full replacement');
     expect(story.summary).toContain('not a benefit unique to E7');

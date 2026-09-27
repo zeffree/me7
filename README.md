@@ -128,11 +128,11 @@ legacy fields and the exact current model policy; removal of a checkbox does not
 
 The landing and **Explore an example** use `src\data\demo.ts`, a single synthetic 1,000-seat
 Microsoft 365 E3 scenario. All displayed outcomes are calculated, not separately typed marketing
-numbers. At the default USD references and no E7 discount, it models $1,797,600 current recurring
-cost, $1,344,000 future recurring cost and a $453,600 annual reduction. It includes a $90,000
+numbers. At the default USD references and no E7 discount, it models $1,701,600 current recurring
+cost, $1,248,000 future recurring cost and a $453,600 annual reduction. It includes a $90,000
 transition budget and two months before retirement savings: year-one net benefit is $168,000,
-three-year net benefit is $1,075,200 and payback is month 8. SIEM, backup and e-signature remain
-paid. Product names illustrate the scenario; these synthetic amounts are not vendor quotes.
+three-year net benefit is $1,075,200 and payback is month 8. Backup and e-signature remain paid;
+SIEM is left out because Sentinel benefits make it debatable. Product names illustrate the scenario; these synthetic amounts are not vendor quotes.
 
 Presenter mode connects the cost bridge, E7 capability map, largest invoice opportunities and
 cash-flow milestones to an owner-based evaluation plan. It explicitly distinguishes current-suite
@@ -233,8 +233,6 @@ a benchmark price and its coverage against each of the three baselines.
 
 ## Features
 
-- **Experience E7**: an independent, playable workplace comparing O365 E3 with E7 across eight
-  hands-on missions, with role paths, rewind, source-linked debriefs and the complete capability index
 - **Guided assessment** with quick capture and optional full-catalog exploration
 - Per-category explainers: what the solution class is, what replaces it, who the main vendors are,
   and a benchmark price for users who do not know their own numbers
@@ -247,41 +245,6 @@ a benchmark price and its coverage against each of the three baselines.
 - Export to versioned JSON, CSV, or a print-friendly business case; restore saved assessments
 - Share links that carry the assessment compressed in the URL fragment; legacy query links remain readable
 - Light and dark themes; keyboard accessible; responsive
-
----
-
-## Experience E7: try the difference
-
-Open **Experience E7** in the navigation or go directly to `#experience`. No assessment, account,
-tenant connection or live AI is needed. The fictional Northstar workplace contains a project-brief
-desk, device bench, access gate, incident room, information room, agent workshop, insights wall and
-meeting space. These are interactive illustrations, not replicas of Microsoft product interfaces.
-
-Choose a role or enter any space. Manipulate the sample artifacts, try the setup, switch between
-**Office 365 E3** and **Microsoft 365 E7**, and rewind your decisions. Each suite keeps its own run;
-changing the common sample case restarts both runs explicitly. Debriefs explain what E3 already
-offers, the specific E7 addition, configuration prerequisites and things that remain separate.
-Some manual E3 workflows succeed, and missing setup or permissions can still stop an E7 workflow.
-
-The capability index derives from the same catalog as the assessment, including not-covered
-categories. It is complete relative to this app, not an exhaustive Microsoft licensing document.
-Prepared Copilot outputs and all workplace data are synthetic. There are no claimed time savings,
-risk scores or financial credits from playing a mission. Astra is a development tool here, not a
-visitor-facing service or a claimed E7 entitlement.
-
-Lab state is separately versioned and stored through `src\store\experienceProgress.ts`.
-Corrupt, incompatible or unavailable storage produces an explicit recovery message; unreadable
-saved progress is not overwritten without a lab-only reset. No lab action loads the financial
-example, changes an invoice, changes the assessment baseline or starts an assessment.
-
-The route and activity components are lazy-loaded. The workplace uses semantic HTML with
-supporting SVG/CSS illustration rather than loading the technical map's Three.js renderer.
-Keyboard, touch and reduced-motion operation remain available. Optional external source links
-are for reference; playing the activities does not make a model, tenant or telemetry request.
-
-Implementation lives in `src\components\experience`, `src\data\experience` and the
-`experience*` engine/evaluation modules under `src\lib`. Exact `#experience` and
-`#experience-main-content` anchors are distinct from assessment share fragments.
 
 ---
 
@@ -307,8 +270,6 @@ Implementation lives in `src\components\experience`, `src\data\experience` and t
 ## Privacy
 
 There is no assessment backend or analytics. State lives in `localStorage` under `me7-assessment`.
-The capability lab has its own browser-storage key and stores only validated synthetic choices
-and discovery progress; resetting it does not clear the assessment.
 The static site is served by an HTTP host, but new shared payloads use `#d=...`, which browsers do
 not send in HTTP requests. **Anyone holding a share link can read the spend data inside it**:
 compression is not encryption, and the link has no access control or revocation.

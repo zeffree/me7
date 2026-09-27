@@ -18,8 +18,6 @@ Help an organization understand current recurring spend, a proposed move to Micr
 
 Users may know only part of their licensing estate. They can enter invoices, use clearly identified estimates, review product coverage, save locally, share a confidential assessment, and export a business case. The primary experience is guided, with a persistent cost summary and optional full-catalog detail.
 
-The separate Experience E7 lab serves mixed business, IT, security and leadership audiences. An explorable fictional workplace offers eight hands-on activities, role-based recommendations and a full index of the existing capability categories. Compare Office 365 E3 with Microsoft 365 E7, replay decisions and retain qualified learning takeaways without starting or changing an assessment. The existing technical architecture explorer remains separate.
-
 ## Capabilities and Constraints
 
 React, TypeScript, and Vite; client-side assessment processing and local persistence. Support the three existing baseline suites, editable customer prices, import/export, sharing, print, light/dark themes, and optional seller guidance.
@@ -34,13 +32,9 @@ The landing and loaded example use one computed, explicitly synthetic case with 
 
 Show TEI studies separately by default; combined simulations require overlap review. No live pricing API, analytics, tenant integration, backend assessment storage, accounts, or mixed-SKU optimization.
 
-The capability lab uses prepared, source-linked scenarios, not live AI or Microsoft services. It has its own versioned browser progress, case variants and separate suite histories. Product licensing, policy configuration, permission boundaries and separate purchases remain distinct. A supported manual E3 workflow can succeed; an unconfigured E7 workflow can remain blocked. Astra assists implementation only and is not presented as an E7 entitlement or a visitor-facing service.
-
 ## Brand Commitments
 
-Make the assessment feel like assembling a clearer tool stack, not completing a tax return. Within the assessment, concentrate playfulness in a reversible example illustration, domain recognition and truthful progress feedback. No sound, fake progress, savings celebrations or changes to assessment data from a playful preview. Respect reduced motion and keep keyboard paths direct.
-
-The capability lab can be more expressive: an authored 2.5D workplace, tactile sample artifacts, reversible choices and discovery marks. Play serves understanding rather than scores or pressure. Use the scoped Clawpilot palette and Segoe UI stack for this surface without recoloring the assessment or technical map. Every activity must remain usable with keyboard, touch and reduced motion.
+Make the assessment feel like assembling a clearer tool stack, not completing a tax return. Within the assessment, concentrate playfulness in a reversible example illustration, domain recognition and truthful progress feedback. No sound, fake progress or changes to assessment data from a playful preview. Savings are celebrated only on the business case, only for a genuine lower recurring cost, once per scenario per session (with a replay control); increases never celebrate and instead show levers that could change the result. Capability cost avoided and TEI are never celebrated or added to cash. Respect reduced motion and keep keyboard paths direct.
 
 An independent personal project, not an official Microsoft quote or endorsed Microsoft tool. Preserve the independent-project disclaimer and feedback contact.
 

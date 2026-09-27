@@ -1,3 +1,4 @@
+import { FlaskConical } from 'lucide-react';
 import type { TeiResult } from '@/model/types';
 import { TEI_STUDIES } from '@/data/teiStudies';
 import { useAssessment } from '@/store/useAssessment';
@@ -7,8 +8,8 @@ import { Note } from '@/components/ui/Primitives';
 
 export function TeiPanel({ tei, currency }: { tei: TeiResult; currency: string }) {
   const s = useAssessment();
-  return <section className="section-block">
-    <details className="disclosure" open={s.tei.enabled || undefined}><summary>Optional · experimental TEI studies</summary>
+  return <section className="section-block tei-section">
+    <details className="disclosure tei-card" open={s.tei.enabled || undefined}><summary><span className="bc-icon" data-tone="tei" aria-hidden="true"><FlaskConical /></span>Optional · experimental TEI studies<span className="lens-badge">Separate lens</span></summary>
       <h2>Explore the studies separately</h2>
       <p className="detail-copy" style={{ margin: '12px 0' }}>Commissioned Forrester studies can help frame a discussion about productivity and risk. They are not an E7 forecast, a customer promise or additional cash savings.</p>
       <Toggle checked={s.tei.enabled} onChange={s.toggleTei} label="Enable experimental study estimates" description="Off by default. Each study stays in USD and separate from the cash business case." />
